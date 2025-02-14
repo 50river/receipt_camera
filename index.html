@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（全体OCR＋ボックス選択）</title>
+  <title>領収書OCRアプリ（個別OCR＋2値化＋複数金額対応）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -51,7 +51,7 @@
   <h2>1. 画像パースペクティブ補正</h2>
   <p>
     ファイルを選択し、画像上で領収書の4隅（左上、右上、右下、左下）の順にクリックしてください。<br>
-    （クリックすると赤い円が表示され、順次線で連結されます。）
+    （クリックすると赤い円が表示され、連結線で示されます。）
   </p>
   <input type="file" id="imageInput" accept="image/*">
   <div id="pcCanvasContainer">
@@ -73,7 +73,7 @@
   <p>
     補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
     ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
-    ※全体OCRはすでに実行済みですので、各ボックス内の文字列を抽出して表示します。
+    OCR実行時、不要なスペース除去、日付は和暦→西暦変換、金額は記号除去して各領域の数値合計を算出します。
   </p>
   <label for="fieldSelector">対象項目:</label>
   <select id="fieldSelector">
@@ -114,9 +114,8 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    let pcScale = 1; // pcCanvas用のスケール
-    let fsScale = 1; // fsCanvas用のスケール
-    let globalHocr = null; // 全体OCR結果（hOCR形式）
+    let pcScale = 1; // pcCanvas用スケール
+    let fsScale = 1; // fsCanvas用スケール
     
     /*==============================
       ① 画像パースペクティブ補正モード
@@ -145,11 +144,7 @@
     
     pcImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
-      if (pcImage.width > maxDisplayWidth) {
-        pcScale = maxDisplayWidth / pcImage.width;
-      } else {
-        pcScale = 1;
-      }
+      pcScale = (pcImage.width > maxDisplayWidth) ? (maxDisplayWidth / pcImage.width) : 1;
       pcCanvas.width = pcImage.width * pcScale;
       pcCanvas.height = pcImage.height * pcScale;
       pcPoints = [];
@@ -268,24 +263,11 @@
     
     fsImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
-      if (fsImage.width > maxDisplayWidth) {
-        fsScale = maxDisplayWidth / fsImage.width;
-      } else {
-        fsScale = 1;
-      }
+      fsScale = (fsImage.width > maxDisplayWidth) ? (maxDisplayWidth / fsImage.width) : 1;
       fsCanvas.width = fsImage.width * fsScale;
       fsCanvas.height = fsImage.height * fsScale;
       fsFieldRegions = {};
       drawFsCanvas();
-      // 全体OCRをhOCR形式で実行して保存
-      Tesseract.recognize(fsImage, 'jpn', { outputFormat: 'hocr', logger: m => console.log("全体OCR", m) })
-        .then(result => {
-          globalHocr = result.data.hocr;
-          console.log("全体OCR結果取得完了");
-        })
-        .catch(err => {
-          console.error("全体OCRエラー", err);
-        });
     };
     
     function drawFsCanvas() {
@@ -374,22 +356,14 @@
       drawFsCanvas();
     });
     
-    // globalHocr 変数に全体OCRのhOCR結果が保存される
-    let globalHocr = null;
-    
-    // FS OCR: 各フィールド領域ごとに、globalHocrからテキスト抽出
     fsOcrButton.addEventListener('click', function() {
-      if (!globalHocr) {
-        alert("全体OCRがまだ完了していません。少々お待ちください。");
-        return;
-      }
       ocrOutput.textContent = "各領域のOCR処理中…\n";
       const tasks = [];
       for (const field in fsFieldRegions) {
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
-          let amountTexts = fsFieldRegions[field].map(region => extractTextFromHocr(region));
+          let amountPromises = fsFieldRegions[field].map(region => performOCROnField("amount", region));
           tasks.push(
-            Promise.all(amountTexts).then(results => {
+            Promise.all(amountPromises).then(results => {
               let total = results.reduce((sum, text) => {
                 let num = parseInt(processAmountField(text), 10);
                 return sum + (isNaN(num) ? 0 : num);
@@ -400,17 +374,18 @@
           );
         } else {
           tasks.push(
-            extractTextFromHocr(fsFieldRegions[field]).then(resultText => {
-              if (field === "date") {
-                resultText = processDateField(resultText);
-                dateField.value = resultText;
-              } else if (field === "payee") {
-                payeeField.value = resultText;
-              } else if (field === "description") {
-                descriptionField.value = resultText;
-              }
-              ocrOutput.textContent += `${field}: ${resultText}\n`;
-            })
+            performOCROnField(field, fsFieldRegions[field])
+              .then(resultText => {
+                if (field === "date") {
+                  resultText = processDateField(resultText);
+                  dateField.value = resultText;
+                } else if (field === "payee") {
+                  payeeField.value = resultText;
+                } else if (field === "description") {
+                  descriptionField.value = resultText;
+                }
+                ocrOutput.textContent += `${field}: ${resultText}\n`;
+              })
           );
         }
       }
@@ -419,40 +394,75 @@
       });
     });
     
-    // hOCRから、指定領域（fsCanvas座標→画像座標に変換）に含まれる単語を抽出する関数
-    function extractTextFromHocr(region) {
+    function performOCROnField(field, region) {
       return new Promise((resolve, reject) => {
-        if (!globalHocr) {
-          resolve("");
-          return;
-        }
-        // fsCanvasは画像がfsScaleで表示されているので、元画像座標に戻す
-        const scaleFactor = 1 / fsScale;
-        const rx = region.x * scaleFactor;
-        const ry = region.y * scaleFactor;
-        const rwidth = region.width * scaleFactor;
-        const rheight = region.height * scaleFactor;
-        let parser = new DOMParser();
-        let hocrDoc = parser.parseFromString(globalHocr, "text/html");
-        let words = hocrDoc.getElementsByClassName("ocrx_word");
-        let extractedWords = [];
-        for (let i = 0; i < words.length; i++) {
-          let span = words[i];
-          let title = span.getAttribute("title");
-          // titleに "bbox" が含まれるはず
-          let bboxMatch = title.match(/bbox (\d+) (\d+) (\d+) (\d+)/);
-          if (bboxMatch) {
-            let x1 = parseInt(bboxMatch[1]);
-            let y1 = parseInt(bboxMatch[2]);
-            let x2 = parseInt(bboxMatch[3]);
-            let y2 = parseInt(bboxMatch[4]);
-            // 判定：単語のbboxが選択領域に重なっているか（簡易的な判定）
-            if (x2 >= rx && x1 <= rx + rwidth && y2 >= ry && y1 <= ry + rheight) {
-              extractedWords.push(span.textContent);
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = region.width;
+        tempCanvas.height = region.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(fsImage, region.x, region.y, region.width, region.height, 0, 0, region.width, region.height);
+        const croppedDataURL = tempCanvas.toDataURL();
+        // 2値化処理を追加してOCR前処理
+        binarizeImage(croppedDataURL).then(binarizedDataURL => {
+          Tesseract.recognize(
+            binarizedDataURL,
+            'jpn',
+            {
+              langPath: 'https://tessdata.projectnaptha.com/4.0.0_best/',
+              logger: m => console.log(field, m),
+              tessedit_char_whitelist: '0123456789年月日-/： ',
+              tessedit_pageseg_mode: 6
             }
-          }
-        }
-        resolve(extractedWords.join(" "));
+          ).then(({ data: { text } }) => {
+            const processedText = replaceCircledNumbers(text).trim();
+            resolve(processedText);
+          }).catch(err => {
+            console.error(field, err);
+            resolve("エラー");
+          });
+        }).catch(err => {
+          console.error("Binarization error", err);
+          resolve("エラー");
+        });
+      });
+    }
+    
+    // 画像の2値化（グレースケール＋閾値処理）
+    function binarizeImage(dataURL) {
+      return new Promise((resolve, reject) => {
+        let img = new Image();
+        img.onload = function() {
+          let canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          let ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          let src = cv.imread(canvas);
+          let gray = new cv.Mat();
+          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+          let binary = new cv.Mat();
+          cv.threshold(gray, binary, 128, 255, cv.THRESH_BINARY);
+          cv.imshow(canvas, binary);
+          let resultDataURL = canvas.toDataURL();
+          src.delete(); gray.delete(); binary.delete();
+          resolve(resultDataURL);
+        };
+        img.onerror = function(err) {
+          reject(err);
+        };
+        img.src = dataURL;
+      });
+    }
+    
+    // 0～12までの丸囲み数字を通常の数字に置換する関数
+    function replaceCircledNumbers(text) {
+      const mapping = {
+        '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4',
+        '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9',
+        '⑩': '10', '⑪': '11', '⑫': '12'
+      };
+      return text.replace(/[⓪①②③④⑤⑥⑦⑧⑨⑩⑪⑫]/g, function(match) {
+        return mapping[match] || match;
       });
     }
     
@@ -488,8 +498,6 @@
       }
       return dateStr;
     }
-    
-    // Pointer Events は FSモードで既に利用済み（上記イベントリスナー参照）
   </script>
 </body>
 </html>
