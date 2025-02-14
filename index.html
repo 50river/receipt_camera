@@ -4,9 +4,11 @@
   <meta charset="UTF-8">
   <title>領収書OCRアプリ（パースペクティブ補正＋各項目選択・OCR／後処理＋複数金額対応）</title>
   <style>
+    /* body に overscroll-behavior を追加してスクロール抑制 */
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
+      overscroll-behavior: none;
     }
     h1, h2, h3, p {
       margin-bottom: 10px;
@@ -24,7 +26,7 @@
       cursor: crosshair;
       max-width: 100%;
       height: auto;
-      touch-action: none; /* タッチ操作時のスクロールを抑制 */
+      touch-action: none; /* タッチ時のスクロール抑制 */
     }
     /* ② フィールド選択モード用 */
     #fsCanvasContainer {
@@ -36,7 +38,7 @@
       cursor: crosshair;
       max-width: 100%;
       height: auto;
-      touch-action: none; /* タッチ操作時のスクロールを抑制 */
+      touch-action: none; /* タッチ時のスクロール抑制 */
     }
     .field-group {
       margin-top: 15px;
@@ -321,6 +323,9 @@
     }
     
     // Pointer Events を使って FSモードのフィールド選択（タッチ・マウス対応）
+    let fsIsDrawing = false;
+    let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
+    
     fsCanvas.addEventListener('pointerdown', function(e) {
       if (!fieldSelector.value) {
         alert("まずは対象項目を選択してください。");
