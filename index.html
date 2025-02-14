@@ -2,7 +2,6 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <!-- レスポンシブ対応のためのviewport設定 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>領収書OCRアプリ</title>
   <style>
@@ -27,7 +26,7 @@
       padding: 10px;
       text-align: center;
     }
-    /* 画面（スクリーン）のスタイル */
+    /* 各スクリーンのスタイル */
     .screen {
       display: none;
       padding: 10px;
@@ -46,7 +45,6 @@
       position: relative;
       margin: 0 auto;
     }
-    /* キャンバスは内部サイズを設定し、表示はCSSで横幅100%に */
     #pcCanvas, #fsCanvas {
       border: 1px solid #ccc;
       cursor: crosshair;
@@ -80,29 +78,11 @@
       width: calc(100% - 90px);
       padding: 3px;
     }
-    /* 編集用の枠（ポイント）の初期サイズ：ここではポイントは15pxの半径、ライン太さは4px */
-    .point {
-      position: absolute;
-      width: 12px;  /* この値は後でcanvas上で直接描画するので、drawPcCanvasWithPoints()内で変更します */
-      height: 12px;
-      background: blue;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-    }
-    /* メディアクエリ例（画面幅600px未満の場合） */
+    /* メディアクエリ */
     @media (max-width: 600px) {
-      #header {
-        padding: 8px;
-        font-size: 1.2em;
-      }
-      button, select {
-        font-size: 1.2em;
-        padding: 0.1em 0.2em;
-      }
-      input[type="text"] {
-        font-size: 1em;
-      }
+      #header { padding: 8px; font-size: 1.2em; }
+      button, select { font-size: 1.2em; padding: 0.1em 0.2em; }
+      input[type="text"] { font-size: 1em; }
     }
   </style>
 </head>
@@ -125,8 +105,7 @@
       <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
       <h3>補正結果</h3>
       <img id="correctedImage" alt="Corrected Image">
-      <!-- 回転・反転ボタン（必要なら） -->
-      <div id="transformControls" style="margin-top:10px; display:none;">
+      <div id="transformControls" style="display:none; margin-top:10px;">
         <button id="rotate90Button">Rotate 90°</button>
         <button id="rotateNeg90Button">Rotate -90°</button>
         <button id="flipButton">Flip Horizontally</button>
@@ -152,7 +131,10 @@
       </div>
       <button id="fsResetButton">フィールドリセット</button>
       <button id="fsOcrButton">選択領域でOCR実行</button>
+      <!-- 全体OCR実行ボタン -->
+      <button id="ocrWholeButton">全体OCR実行</button>
       <h3>OCR結果</h3>
+      <!-- OCR結果表示エリア -->
       <pre id="ocrOutput"></pre>
       <div class="field-group">
         <label for="dateField">日付:</label>
@@ -175,61 +157,25 @@
   </div>
   
   <!-- ライブラリ読み込み -->
-  <!-- Tesseract.js 最新版（安定版ではなく最新版） -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.0/dist/tesseract.min.js"></script>
-  <!-- OpenCV.js -->
-  <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
+  <!-- Tesseract.js はバージョン 2.1.5 を利用 -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <!-- OpenCV.js（必要に応じて onOpenCvReady() の実装を追加してください） -->
+  <script async src="https://docs.opencv.org/3.4.0/opencv.js"></script>
   
   <script>
     /***********************************************************************
-     * 変数一覧と用途:
-     * 
-     * pcScale           : PCキャンバス上で表示される画像のスケール（内部サイズ/表示サイズ）
-     * fsScale           : FSキャンバス上で表示される画像のスケール
-     * detectedPoints    : PCキャンバス上で検出（またはデフォルト）された4点（クロッピング用）
-     * draggingPointIndex: ドラッグ中のポイントのインデックス（ドラッグしていなければ -1）
-     * AREA_THRESHOLD    : 輪郭検出時に使用する面積の閾値
-     * 
-     * pcCanvas, pcCtx   : PCキャンバス要素とその2Dコンテキスト（自動切り出し＆補正用）
-     * pcImage           : アップロードされたオリジナル画像
-     * imageInput        : 画像ファイル選択用の input 要素
-     * autoCropButton    : 自動切り出し＆補正を実行するボタン
-     * confirmPointsButton: ユーザーが編集したクロッピング用の4点を確定するボタン
-     * correctedImage    : 補正後の画像を表示する img 要素
-     * loadFsButton      : 補正後画像をFSモードに読み込むボタン
-     * transformControls : 画像の回転・反転操作用ボタンを含むコンテナ
-     * 
-     * fsCanvas, fsCtx   : FSキャンバス要素とその2Dコンテキスト（フィールド選択用）
-     * fsImage           : 補正後画像をFSモードで利用するためのImageオブジェクト
-     * fsFieldRegions    : フィールド選択でユーザーが選択した領域（各フィールド名をキーとする）
-     * fieldSelector     : OCR対象フィールド（日付、金額、支払先、摘要）を選択するドロップダウン
-     * fsResetButton     : FSモードでフィールド選択をリセットするボタン
-     * fsOcrButton       : 選択した領域でOCRを実行するボタン
-     * ocrOutput         : OCR結果を表示するpre要素
-     * dateField, amountField, payeeField, descriptionField:
-     *                   各フィールドのOCR結果を表示するテキスト入力欄
+     * 以下、画像読み込み、クロッピング、OCR、回転・反転などの実装
      ***********************************************************************/
     
-    // 画面遷移用関数
+    // 画面遷移用
     function showScreen(screenId) {
-      const screens = document.querySelectorAll('.screen');
-      screens.forEach(screen => {
-        if (screen.id === screenId) {
-          screen.classList.add('active');
-        } else {
-          screen.classList.remove('active');
-        }
+      document.querySelectorAll('.screen').forEach(screen => {
+        screen.classList.toggle('active', screen.id === screenId);
       });
-      // 画面遷移後にキャンバスの再描画
-      if(screenId === 'screen1') {
-        drawPcCanvasWithPoints();
-      }
-      if(screenId === 'screen2') {
-        drawFsCanvas();
-      }
+      if(screenId === 'screen1') drawPcCanvasWithPoints();
+      if(screenId === 'screen2') drawFsCanvas();
     }
     
-    // 画面遷移ボタン
     document.getElementById('nextToScreen2').addEventListener('click', function() {
       if (!correctedImage.src) {
         alert("補正結果画像がありません。");
@@ -242,11 +188,11 @@
       showScreen('screen1');
     });
     
-    // -------------------- PC（切り出し＆補正）モード --------------------
-    let pcScale = 1;      // 元画像からキャンバスへの表示スケール
-    let detectedPoints = [];  // 自動検出またはデフォルトの4点
-    let draggingPointIndex = -1; // ドラッグ中のポイントインデックス（なければ -1）
-    const AREA_THRESHOLD = 10000;  // 輪郭検出に使用する面積閾値
+    // ---------- PCモード（画像切り出し＆補正） ----------
+    let pcScale = 1;
+    let detectedPoints = [];
+    let draggingPointIndex = -1;
+    const AREA_THRESHOLD = 10000;
     
     const pcCanvas = document.getElementById('pcCanvas');
     const pcCtx = pcCanvas.getContext('2d');
@@ -256,26 +202,19 @@
     const autoCropButton = document.getElementById('autoCropButton');
     const confirmPointsButton = document.getElementById('confirmPointsButton');
     const correctedImage = document.getElementById('correctedImage');
-    const loadFsButton = document.getElementById('loadFsButton');
     const transformControls = document.getElementById('transformControls');
     
-    // 画像ファイル選択時：画像を読み込む
     imageInput.addEventListener('change', function(e) {
       if (e.target.files.length > 0) {
-        const file = e.target.files[0];
         const reader = new FileReader();
-        reader.onload = function(event) {
-          pcImage.src = event.target.result;
-        };
-        reader.readAsDataURL(file);
+        reader.onload = event => { pcImage.src = event.target.result; };
+        reader.readAsDataURL(e.target.files[0]);
       }
     });
     
-    // pcImage読み込み後：キャンバスに画像を描画
     pcImage.onload = function() {
-      let maxDisplayWidth = window.innerWidth - 40;
+      const maxDisplayWidth = window.innerWidth - 40;
       pcScale = (pcImage.width > maxDisplayWidth) ? (maxDisplayWidth / pcImage.width) : 1;
-      // キャンバス内部サイズは元画像サイズにスケールを掛けたもの
       pcCanvas.width = pcImage.width * pcScale;
       pcCanvas.height = pcImage.height * pcScale;
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
@@ -285,37 +224,35 @@
       transformControls.style.display = "none";
     };
     
-    // 自動輪郭検出（autoCrop関数）
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
         return;
       }
-      let srcMat = cv.imread(pcCanvas);
-      let gray = new cv.Mat();
+      const srcMat = cv.imread(pcCanvas);
+      const gray = new cv.Mat();
       cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY, 0);
-      let blurred = new cv.Mat();
+      const blurred = new cv.Mat();
       cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0);
-      let edges = new cv.Mat();
+      const edges = new cv.Mat();
       cv.Canny(blurred, edges, 50, 150);
-      let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
-      let dilated = new cv.Mat();
+      const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+      const dilated = new cv.Mat();
       cv.dilate(edges, dilated, kernel);
       
-      let contours = new cv.MatVector();
-      let hierarchy = new cv.Mat();
+      const contours = new cv.MatVector();
+      const hierarchy = new cv.Mat();
       cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
       
-      let maxArea = 0;
-      let bestContour = null;
+      let maxArea = 0, bestContour = null;
       for (let i = 0; i < contours.size(); i++) {
-        let cnt = contours.get(i);
-        let peri = cv.arcLength(cnt, true);
-        let approx = new cv.Mat();
+        const cnt = contours.get(i);
+        const peri = cv.arcLength(cnt, true);
+        const approx = new cv.Mat();
         cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
         if (approx.rows === 4) {
-          let area = cv.contourArea(approx);
-          console.log("Contour " + i + " area:", area);
+          const area = cv.contourArea(approx);
+          console.log(`Contour ${i} area: ${area}`);
           if (area > AREA_THRESHOLD && area > maxArea) {
             maxArea = area;
             if (bestContour !== null) bestContour.delete();
@@ -328,14 +265,9 @@
         }
         cnt.delete();
       }
-      hierarchy.delete();
-      edges.delete();
-      dilated.delete();
-      kernel.delete();
-      blurred.delete();
-      gray.delete();
+      hierarchy.delete(); edges.delete(); dilated.delete(); kernel.delete();
+      blurred.delete(); gray.delete();
       
-      // 輪郭検出が失敗した場合：キャンバスの左右上下10%の余白を持つ枠を設定
       if (bestContour === null) {
         const marginX = pcCanvas.width * 0.1;
         const marginY = pcCanvas.height * 0.1;
@@ -345,45 +277,35 @@
           { x: pcCanvas.width - marginX, y: pcCanvas.height - marginY },
           { x: marginX, y: pcCanvas.height - marginY }
         ];
-        console.log("輪郭検出できなかったため、余白付きのデフォルト枠を設定");
+        console.log("輪郭検出できなかったため、デフォルト枠を設定");
         drawPcCanvasWithPoints();
         confirmPointsButton.style.display = "inline-block";
         srcMat.delete();
         return;
       }
       
-      // 検出された輪郭の4点を取得
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
-        detectedPoints.push({
-          x: bestContour.intAt(i, 0),
-          y: bestContour.intAt(i, 1)
-        });
+        detectedPoints.push({ x: bestContour.intAt(i, 0), y: bestContour.intAt(i, 1) });
       }
       bestContour.delete();
-      
-      // 4点を [tl, tr, br, bl] の順に並び替え
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
       confirmPointsButton.style.display = "inline-block";
-      
       srcMat.delete();
     }
     
-    // 4点を正しい順序に並び替える関数（[tl, tr, br, bl]の順）
     function orderPoints(pts) {
-      let sumArr = pts.map(p => p.x + p.y);
-      let diffArr = pts.map(p => p.x - p.y);
-      let tl = pts[sumArr.indexOf(Math.min(...sumArr))];
-      let br = pts[sumArr.indexOf(Math.max(...sumArr))];
-      let tr = pts[diffArr.indexOf(Math.min(...diffArr))];
-      let bl = pts[diffArr.indexOf(Math.max(...diffArr))];
+      const sumArr = pts.map(p => p.x + p.y);
+      const diffArr = pts.map(p => p.x - p.y);
+      const tl = pts[sumArr.indexOf(Math.min(...sumArr))];
+      const br = pts[sumArr.indexOf(Math.max(...sumArr))];
+      const tr = pts[diffArr.indexOf(Math.min(...diffArr))];
+      const bl = pts[diffArr.indexOf(Math.max(...diffArr))];
       return [tl, tr, br, bl];
     }
     
-    // PCキャンバスに画像と編集用のポイント・ラインを描画する関数
-    // ポイントの半径を15px、連結線の太さを4pxに設定
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
@@ -408,7 +330,6 @@
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // PCキャンバスの pointer イベント：表示サイズと内部サイズの比率を使って正確な内部座標に変換
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
@@ -418,10 +339,8 @@
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       draggingPointIndex = -1;
-      // ポイント検出の許容誤差は15pxに設定
       for (let i = 0; i < 4; i++) {
-        let pt = detectedPoints[i];
-        if (Math.hypot(pt.x - x, pt.y - y) < 15) {
+        if (Math.hypot(detectedPoints[i].x - x, detectedPoints[i].y - y) < 15) {
           draggingPointIndex = i;
           break;
         }
@@ -440,61 +359,55 @@
       drawPcCanvasWithPoints();
     });
     
-    pcCanvas.addEventListener('pointerup', function(e) {
-      e.preventDefault();
-      draggingPointIndex = -1;
-    });
+    pcCanvas.addEventListener('pointerup', e => { e.preventDefault(); draggingPointIndex = -1; });
     
-    // ポイント確定ボタン：ユーザーが調整した4点をもとにパースペクティブ変換を実施
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      let ptsOriginal = detectedPoints.map(pt => ({ x: pt.x / pcScale, y: pt.y / pcScale }));
-      ptsOriginal = orderPoints(ptsOriginal);
-      let [tl, tr, br, bl] = ptsOriginal;
+      const ptsOriginal = detectedPoints.map(pt => ({ x: pt.x / pcScale, y: pt.y / pcScale }));
+      const [tl, tr, br, bl] = orderPoints(ptsOriginal);
       
-      let widthA = Math.hypot(br.x - bl.x, br.y - bl.y);
-      let widthB = Math.hypot(tr.x - tl.x, tr.y - tl.y);
-      let maxWidth = Math.max(widthA, widthB);
+      const widthA = Math.hypot(br.x - bl.x, br.y - bl.y);
+      const widthB = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+      const maxWidth = Math.max(widthA, widthB);
       
-      let heightA = Math.hypot(tr.x - br.x, tr.y - br.y);
-      let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
-      let maxHeight = Math.max(heightA, heightB);
+      const heightA = Math.hypot(tr.x - br.x, tr.y - br.y);
+      const heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
+      const maxHeight = Math.max(heightA, heightB);
       
-      let offCanvas = document.createElement('canvas');
+      const offCanvas = document.createElement('canvas');
       offCanvas.width = pcImage.width;
       offCanvas.height = pcImage.height;
-      let offCtx = offCanvas.getContext('2d');
+      const offCtx = offCanvas.getContext('2d');
       offCtx.drawImage(pcImage, 0, 0);
-      let srcMat = cv.imread(offCanvas);
+      const srcMat = cv.imread(offCanvas);
       
-      let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
         tl.x, tl.y,
         tr.x, tr.y,
         br.x, br.y,
         bl.x, bl.y
       ]);
-      let dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
         0, 0,
         maxWidth - 1, 0,
         maxWidth - 1, maxHeight - 1,
         0, maxHeight - 1
       ]);
       
-      let M = cv.getPerspectiveTransform(srcPts, dstPts);
-      let dsize = new cv.Size(maxWidth, maxHeight);
-      let dstMat = new cv.Mat();
+      const M = cv.getPerspectiveTransform(srcPts, dstPts);
+      const dsize = new cv.Size(maxWidth, maxHeight);
+      const dstMat = new cv.Mat();
       cv.warpPerspective(srcMat, dstMat, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
       
-      let tempCanvas = document.createElement('canvas');
+      const tempCanvas = document.createElement('canvas');
       tempCanvas.width = maxWidth;
       tempCanvas.height = maxHeight;
       cv.imshow(tempCanvas, dstMat);
-      let croppedDataURL = tempCanvas.toDataURL();
+      const croppedDataURL = tempCanvas.toDataURL();
       
-      // 補正後の画像を自動で90°回転＋水平反転して最終画像とする
       rotateImage(croppedDataURL, 90)
         .then(rotatedDataURL => flipImage(rotatedDataURL))
         .then(finalDataURL => {
@@ -504,20 +417,21 @@
         });
       
       srcMat.delete(); dstMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
-      
       detectedPoints = [];
       confirmPointsButton.style.display = "none";
     });
     
-    // -------------------- FS（フィールド選択＆OCR）モード --------------------
+    // ---------- FSモード（フィールド選択＆OCR） ----------
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
     const fsCtx = fsCanvas.getContext('2d');
-    let fsFieldRegions = {};  // 各フィールド名をキーとした、領域情報オブジェクト
+    let fsScale = 1;
+    let fsFieldRegions = {};
     
     const fieldSelector = document.getElementById('fieldSelector');
     const fsResetButton = document.getElementById('fsResetButton');
     const fsOcrButton = document.getElementById('fsOcrButton');
+    const ocrWholeButton = document.getElementById('ocrWholeButton');
     const ocrOutput = document.getElementById('ocrOutput');
     const dateField = document.getElementById('dateField');
     const amountField = document.getElementById('amountField');
@@ -525,7 +439,7 @@
     const descriptionField = document.getElementById('descriptionField');
     
     fsImage.onload = function() {
-      let maxDisplayWidth = window.innerWidth - 40;
+      const maxDisplayWidth = window.innerWidth - 40;
       fsScale = (fsImage.width > maxDisplayWidth) ? (maxDisplayWidth / fsImage.width) : 1;
       fsCanvas.width = fsImage.width * fsScale;
       fsCanvas.height = fsImage.height * fsScale;
@@ -536,7 +450,7 @@
     function drawFsCanvas() {
       fsCtx.clearRect(0, 0, fsCanvas.width, fsCanvas.height);
       fsCtx.drawImage(fsImage, 0, 0, fsCanvas.width, fsCanvas.height);
-      // フィールド選択枠の描画（ライン太さ4px）
+      // ユーザー指定の領域枠（赤）はそのまま描画
       for (const field in fsFieldRegions) {
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
           fsFieldRegions[field].forEach(region => {
@@ -563,9 +477,7 @@
       }
     }
     
-    // FSキャンバスの描画：ユーザーがドラッグして選択した領域の座標を正しく取得
-    let fsIsDrawing = false;
-    let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
+    let fsIsDrawing = false, fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
     fsCanvas.addEventListener('pointerdown', function(e) {
       if (!fieldSelector.value) {
@@ -611,9 +523,7 @@
       if (width === 0 || height === 0) return;
       const field = fieldSelector.value;
       if (field === "amount") {
-        if (!fsFieldRegions[field]) {
-          fsFieldRegions[field] = [];
-        }
+        if (!fsFieldRegions[field]) fsFieldRegions[field] = [];
         fsFieldRegions[field].push({ x, y, width, height });
       } else {
         fsFieldRegions[field] = { x, y, width, height };
@@ -644,18 +554,17 @@
           );
         } else {
           tasks.push(
-            performOCROnField(field, fsFieldRegions[field])
-              .then(resultText => {
-                if (field === "date") {
-                  resultText = processDateField(resultText);
-                  dateField.value = resultText;
-                } else if (field === "payee") {
-                  payeeField.value = resultText;
-                } else if (field === "description") {
-                  descriptionField.value = resultText;
-                }
-                ocrOutput.textContent += `${field}: ${resultText}\n`;
-              })
+            performOCROnField(field, fsFieldRegions[field]).then(resultText => {
+              if (field === "date") {
+                resultText = processDateField(resultText);
+                dateField.value = resultText;
+              } else if (field === "payee") {
+                payeeField.value = resultText;
+              } else if (field === "description") {
+                descriptionField.value = resultText;
+              }
+              ocrOutput.textContent += `${field}: ${resultText}\n`;
+            })
           );
         }
       }
@@ -664,22 +573,267 @@
       });
     });
     
-    // FSモード：指定領域でOCRを実行する関数
+    // ---------- 全体OCR実行（ワーカーAPI版） ----------
+    ocrWholeButton.addEventListener('click', async function() {
+      ocrOutput.textContent = "全体OCR実行中...\n";
+      if (!fsImage.src) {
+        console.error("fsImage.src が設定されていません。");
+        ocrOutput.textContent += "エラー: 画像が読み込まれていません。\n";
+        return;
+      }
+      const worker = Tesseract.createWorker({
+        logger: m => console.log("全体OCR:", m)
+      });
+      try {
+        await worker.load();
+        await worker.loadLanguage('jpn');
+        await worker.initialize('jpn');
+        const { data } = await worker.recognize(fsImage.src);
+        ocrOutput.textContent += "全体OCR完了。\n";
+        // 個々の単語枠は描画せず、グループ化して枠を表示
+        displayGroupedText(data);
+      } catch (err) {
+        console.error("全体OCRエラー:", err);
+        ocrOutput.textContent += "エラーが発生しました。\n" + err;
+      } finally {
+        await worker.terminate();
+      }
+    });
+    
+    /**
+     * グループ化されたOCR結果を表示するとともに、各グループの領域を計算して横方向の重なりがあるもののみをマージし、
+     * マージされた領域に対して再OCRを実施する
+     * @param {Object} data - Tesseract OCR の結果オブジェクト
+     */
+    function displayGroupedText(data) {
+      const groups = groupWordsByLine(data.words, 10);
+      let groupedText = "\n【グループ化されたOCR結果】\n";
+      let boxes = [];
+      groups.forEach((group, index) => {
+        const lineText = group.map(word => word.text).join(" ").trim();
+        groupedText += `Line ${index + 1}: ${lineText ? lineText : "認識なし"}\n`;
+        // 各グループの領域を計算（元画像座標）
+        const box = computeGroupBoundingBox(group);
+        // fsCanvas上の座標に変換（fsScaleを掛ける）
+        boxes.push({ 
+          x: box.minX * fsScale, 
+          y: box.minY * fsScale, 
+          width: (box.maxX - box.minX) * fsScale, 
+          height: (box.maxY - box.minY) * fsScale 
+        });
+      });
+      ocrOutput.textContent += groupedText;
+      console.log(groupedText);
+      // マージ処理：ここでは横方向の重なりがある場合のみマージする（横方向オーバーラップの割合が50%以上の場合）
+      const mergedBoxes = mergeOverlappingBoxes(boxes);
+      // マージ後の枠を描画
+      drawGroupedBoxes(mergedBoxes);
+      // マージされた各領域内で再OCR実施
+      reOcrMergedBoxes(mergedBoxes);
+    }
+    
+    /**
+     * グループ内の単語から領域（バウンディングボックス）を計算する
+     * @param {Array} group - 単語オブジェクトの配列
+     * @returns {Object} - { minX, minY, maxX, maxY } の領域情報
+     */
+    function computeGroupBoundingBox(group) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      group.forEach(word => {
+        const { x0, y0, x1, y1 } = word.bbox;
+        minX = Math.min(minX, x0);
+        minY = Math.min(minY, y0);
+        maxX = Math.max(maxX, x1);
+        maxY = Math.max(maxY, y1);
+      });
+      return { minX, minY, maxX, maxY };
+    }
+    
+    /**
+     * OCR結果の単語配列を、bbox の y 座標でグループ化して行ごとにまとめる
+     * @param {Array} words - Tesseract OCR の data.words 配列
+     * @param {number} threshold - y 座標の差分の閾値（ピクセル単位）
+     * @returns {Array} - 行ごとの単語の2次元配列
+     */
+    function groupWordsByLine(words, threshold = 10) {
+      words.sort((a, b) => a.bbox.y0 - b.bbox.y0);
+      const groups = [];
+      let currentGroup = [];
+      let currentY = null;
+      words.forEach(word => {
+        if (currentY === null) {
+          currentY = word.bbox.y0;
+          currentGroup.push(word);
+        } else {
+          if (Math.abs(word.bbox.y0 - currentY) < threshold) {
+            currentGroup.push(word);
+          } else {
+            groups.push(currentGroup);
+            currentGroup = [word];
+            currentY = word.bbox.y0;
+          }
+        }
+      });
+      if (currentGroup.length > 0) groups.push(currentGroup);
+      return groups;
+    }
+    
+    /**
+     * 2つの矩形が横方向に十分な重なりがあるかどうか判定する
+     * ※ここでは、2つの矩形の横方向の重なり幅が、小さい方の幅の50%以上の場合のみ重なっていると判断する
+     * @param {Object} box1 - {x, y, width, height}
+     * @param {Object} box2 - {x, y, width, height}
+     * @returns {boolean} - 十分な横方向の重なりがあれば true
+     */
+    function isOverlap(box1, box2) {
+      const left = Math.max(box1.x, box2.x);
+      const right = Math.min(box1.x + box1.width, box2.x + box2.width);
+      const overlapWidth = right - left;
+      if (overlapWidth <= 0) return false;
+      const minWidth = Math.min(box1.width, box2.width);
+      return (overlapWidth >= 1.4 * minWidth);　// 140%以上の重なりがあるかどうか
+    }
+    
+    /**
+     * 2つの矩形のユニオン（合体）を返す
+     * @param {Object} box1
+     * @param {Object} box2
+     * @returns {Object} - マージされた矩形
+     */
+    function unionBox(box1, box2) {
+      const x = Math.min(box1.x, box2.x);
+      const y = Math.min(box1.y, box2.y);
+      const right = Math.max(box1.x + box1.width, box2.x + box2.width);
+      const bottom = Math.max(box1.y + box1.height, box2.y + box2.height);
+      return { x, y, width: right - x, height: bottom - y };
+    }
+    
+    /**
+     * 複数の矩形のうち、横方向に十分な重なりがあるものをマージする
+     * @param {Array} boxes - 各矩形は {x, y, width, height}
+     * @returns {Array} - マージ後の矩形配列
+     */
+    function mergeOverlappingBoxes(boxes) {
+      let merged = boxes.slice();
+      let didMerge = true;
+      while(didMerge) {
+        didMerge = false;
+        let newMerged = [];
+        let used = new Array(merged.length).fill(false);
+        for (let i = 0; i < merged.length; i++) {
+          if (used[i]) continue;
+          let current = merged[i];
+          for (let j = i + 1; j < merged.length; j++) {
+            if (used[j]) continue;
+            if (isOverlap(current, merged[j])) {
+              current = unionBox(current, merged[j]);
+              used[j] = true;
+              didMerge = true;
+            }
+          }
+          newMerged.push(current);
+        }
+        merged = newMerged;
+      }
+      return merged;
+    }
+    
+    /**
+     * マージされた各グループ領域を fsCanvas 上に描画する
+     * @param {Array} boxes - マージ後の矩形配列（各矩形は {x, y, width, height}）
+     */
+    function drawGroupedBoxes(boxes) {
+      boxes.forEach((box, index) => {
+        fsCtx.strokeStyle = "magenta";
+        fsCtx.lineWidth = 3;
+        fsCtx.strokeRect(box.x, box.y, box.width, box.height);
+        fsCtx.fillStyle = "magenta";
+        fsCtx.font = "16px Arial";
+        fsCtx.fillText("Group " + (index + 1), box.x, box.y - 5);
+      });
+    }
+    
+    /**
+     * マージされた各領域内で再OCRを実施し、その結果を枠ラベルとして描画する
+     * @param {Array} mergedBoxes - マージされた矩形配列
+     */
+    async function reOcrMergedBoxes(mergedBoxes) {
+      for (let i = 0; i < mergedBoxes.length; i++) {
+        let box = mergedBoxes[i];
+        // 元画像上の座標に変換
+        let originalX = box.x / fsScale;
+        let originalY = box.y / fsScale;
+        let originalWidth = box.width / fsScale;
+        let originalHeight = box.height / fsScale;
+        let tempCanvas = document.createElement('canvas');
+        tempCanvas.width = originalWidth;
+        tempCanvas.height = originalHeight;
+        let tempCtx = tempCanvas.getContext('2d');
+        // fsImage（補正済み画像）から切り出し
+        tempCtx.drawImage(fsImage, originalX, originalY, originalWidth, originalHeight, 0, 0, originalWidth, originalHeight);
+        let croppedDataURL = tempCanvas.toDataURL();
+        const worker = Tesseract.createWorker({ logger: m => console.log("Merged OCR:", m) });
+        await worker.load();
+        await worker.loadLanguage('jpn');
+        await worker.initialize('jpn');
+        const { data } = await worker.recognize(croppedDataURL);
+        await worker.terminate();
+        let text = data.text.trim();
+        if (!text) text = "認識なし";
+        // マージ枠を青色で再描画し、ラベルにOCR結果を表示
+        fsCtx.strokeStyle = "blue";
+        fsCtx.lineWidth = 3;
+        fsCtx.strokeRect(box.x, box.y, box.width, box.height);
+        fsCtx.fillStyle = "blue";
+        fsCtx.font = "16px Arial";
+        fsCtx.fillText("Merged: " + text, box.x, box.y - 5);
+      }
+    }
+    
+    /**
+     * グループ化されたOCR結果を表示し、各グループの領域を計算して横方向の重なりがあるもののみをマージし、
+     * マージされた領域に対して再OCRを実施する
+     * @param {Object} data - Tesseract OCR の結果オブジェクト
+     */
+    function displayGroupedText(data) {
+      const groups = groupWordsByLine(data.words, 10);
+      let groupedText = "\n【グループ化されたOCR結果】\n";
+      let boxes = [];
+      groups.forEach((group, index) => {
+        const lineText = group.map(word => word.text).join(" ").trim();
+        groupedText += `Line ${index + 1}: ${lineText ? lineText : "認識なし"}\n`;
+        // 各グループの領域を計算（元画像座標）
+        const box = computeGroupBoundingBox(group);
+        // fsCanvas上の座標に変換（fsScaleを掛ける）
+        boxes.push({ 
+          x: box.minX * fsScale, 
+          y: box.minY * fsScale, 
+          width: (box.maxX - box.minX) * fsScale, 
+          height: (box.maxY - box.minY) * fsScale 
+        });
+      });
+      ocrOutput.textContent += groupedText;
+      console.log(groupedText);
+      // マージ処理：横方向の重なりがある場合のみマージする（横方向オーバーラップの割合が50%以上の場合）
+      const mergedBoxes = mergeOverlappingBoxes(boxes);
+      // マージ後の枠を描画
+      drawGroupedBoxes(mergedBoxes);
+      // マージされた各領域内で再OCR実施
+      reOcrMergedBoxes(mergedBoxes);
+    }
+    
     function performOCROnField(field, region) {
       return new Promise((resolve, reject) => {
-        // FSキャンバス上の領域座標を元画像の座標に変換
-        let originalX = region.x / fsScale;
-        let originalY = region.y / fsScale;
-        let originalWidth = region.width / fsScale;
-        let originalHeight = region.height / fsScale;
-        
+        const originalX = region.x / fsScale;
+        const originalY = region.y / fsScale;
+        const originalWidth = region.width / fsScale;
+        const originalHeight = region.height / fsScale;
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = originalWidth;
         tempCanvas.height = originalHeight;
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(fsImage, originalX, originalY, originalWidth, originalHeight, 0, 0, originalWidth, originalHeight);
         const croppedDataURL = tempCanvas.toDataURL();
-        // 2値化処理でOCR精度向上
         binarizeImage(croppedDataURL).then(binarizedDataURL => {
           Tesseract.recognize(
             binarizedDataURL,
@@ -691,8 +845,7 @@
               tessedit_pageseg_mode: 6
             }
           ).then(({ data: { text } }) => {
-            const processedText = replaceCircledNumbers(text).trim();
-            resolve(processedText);
+            resolve(replaceCircledNumbers(text).trim());
           }).catch(err => {
             console.error(field, err);
             resolve("エラー");
@@ -704,46 +857,39 @@
       });
     }
     
-    // 画像を2値化してOCR精度向上のための画像に変換
     function binarizeImage(dataURL) {
       return new Promise((resolve, reject) => {
-        let img = new Image();
+        const img = new Image();
         img.onload = function() {
-          let canvas = document.createElement('canvas');
+          const canvas = document.createElement('canvas');
           canvas.width = img.width;
           canvas.height = img.height;
-          let ctx = canvas.getContext('2d');
+          const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0);
-          let src = cv.imread(canvas);
-          let gray = new cv.Mat();
+          const src = cv.imread(canvas);
+          const gray = new cv.Mat();
           cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-          let binary = new cv.Mat();
+          const binary = new cv.Mat();
           cv.threshold(gray, binary, 128, 255, cv.THRESH_BINARY);
           cv.imshow(canvas, binary);
-          let resultDataURL = canvas.toDataURL();
+          const resultDataURL = canvas.toDataURL();
           src.delete(); gray.delete(); binary.delete();
           resolve(resultDataURL);
         };
-        img.onerror = function(err) {
-          reject(err);
-        };
+        img.onerror = function(err) { reject(err); };
         img.src = dataURL;
       });
     }
     
-    // 丸囲み数字を通常の数字に置換する関数
     function replaceCircledNumbers(text) {
       const mapping = {
         '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4',
         '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9',
         '⑩': '10', '⑪': '11', '⑫': '12'
       };
-      return text.replace(/[⓪①②③④⑤⑥⑦⑧⑨⑩⑪⑫]/g, function(match) {
-        return mapping[match] || match;
-      });
+      return text.replace(/[⓪①②③④⑤⑥⑦⑧⑨⑩⑪⑫]/g, match => mapping[match] || match);
     }
     
-    // 日付フィールド用の後処理（和暦を西暦に変換など）
     function processDateField(text) {
       if (text.includes("令和") || text.includes("平成") || text.includes("昭和")) {
         return convertJapaneseEra(text);
@@ -751,35 +897,28 @@
       return text;
     }
     
-    // 金額フィールド用の後処理（数字以外を除去）
     function processAmountField(text) {
       return text.replace(/\D/g, "");
     }
     
-    // 和暦を西暦に変換する関数
     function convertJapaneseEra(dateStr) {
-      let match = dateStr.match(/(令和|平成|昭和)(元|\d+)[年](\d{1,2})[月](\d{1,2})[日]/);
+      const match = dateStr.match(/(令和|平成|昭和)(元|\d+)[年](\d{1,2})[月](\d{1,2})[日]/);
       if (match) {
-        let era = match[1];
-        let yearPart = match[2];
-        let month = match[3];
-        let day = match[4];
+        const era = match[1];
+        const yearPart = match[2];
+        const month = match[3];
+        const day = match[4];
         let offset = 0;
         if (era === "令和") offset = 2018;
         else if (era === "平成") offset = 1988;
         else if (era === "昭和") offset = 1925;
-        let year;
-        if (yearPart === "元") {
-          year = offset + 1;
-        } else {
-          year = parseInt(yearPart, 10) + offset;
-        }
+        const year = (yearPart === "元") ? offset + 1 : parseInt(yearPart, 10) + offset;
         return year + "年" + month + "月" + day + "日";
       }
       return dateStr;
     }
     
-    // 回転・反転操作用
+    // ---------- 回転・反転処理 ----------
     const rotate90Button = document.getElementById('rotate90Button');
     const rotateNeg90Button = document.getElementById('rotateNeg90Button');
     const flipButton = document.getElementById('flipButton');
@@ -805,13 +944,12 @@
       });
     });
     
-    // 画像を指定角度回転する関数（dataURLを受け取り、回転後のdataURLを返す）
     function rotateImage(dataURL, angle) {
       return new Promise((resolve, reject) => {
-        let img = new Image();
+        const img = new Image();
         img.onload = function() {
-          let canvas = document.createElement('canvas');
-          let ctx = canvas.getContext('2d');
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
           if (angle % 180 !== 0) {
             canvas.width = img.height;
             canvas.height = img.width;
@@ -831,15 +969,14 @@
       });
     }
     
-    // 画像を水平反転する関数
     function flipImage(dataURL) {
       return new Promise((resolve, reject) => {
-        let img = new Image();
+        const img = new Image();
         img.onload = function() {
-          let canvas = document.createElement('canvas');
+          const canvas = document.createElement('canvas');
           canvas.width = img.width;
           canvas.height = img.height;
-          let ctx = canvas.getContext('2d');
+          const ctx = canvas.getContext('2d');
           ctx.save();
           ctx.translate(img.width, 0);
           ctx.scale(-1, 1);
@@ -852,24 +989,7 @@
       });
     }
     
-    // loadFsButton：補正済み画像をFSモードへ内部保存・再読み込み
-    loadFsButton.addEventListener('click', function() {
-      if (!correctedImage.src) {
-        alert("まず、補正を実行してください。");
-        return;
-      }
-      let storedDataURL = correctedImage.src + "?t=" + new Date().getTime();
-      console.log("loadFsButton: storedDataURL =", storedDataURL);
-      fsImage.onload = function() {
-        fsScale = (fsImage.width > (window.innerWidth - 40)) ? ((window.innerWidth - 40) / fsImage.width) : 1;
-        fsCanvas.width = fsImage.width * fsScale;
-        fsCanvas.height = fsImage.height * fsScale;
-        console.log("FS Canvas size:", fsCanvas.width, fsCanvas.height);
-        drawFsCanvas();
-      };
-      fsImage.src = storedDataURL;
-    });
-    // fsImageの再初期化は行わない
+    // ※ OpenCV.js の onOpenCvReady() の実装は各環境に合わせてご用意ください。
   </script>
 </body>
 </html>
