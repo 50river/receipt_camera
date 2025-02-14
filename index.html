@@ -2,31 +2,72 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（自動切り出し＋回転・反転自動適用／ポイント調整＆各項目選択・OCR／2値化＋複数金額対応）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>領収書OCRアプリ</title>
   <style>
+    /* 全体レイアウト */
     body {
+      margin: 0;
       font-family: Arial, sans-serif;
-      margin: 20px;
-      overscroll-behavior: none; /* スクロール抑制 */
+      background: #f0f0f0;
+    }
+    #app {
+      width: 100%;
+      max-width: 600px;
+      margin: 0 auto;
+      background: #fff;
+      min-height: 100vh;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    /* ヘッダー */
+    #header {
+      background: #007aff;
+      color: #fff;
+      padding: 10px;
+      text-align: center;
+    }
+    /* 画面（スクリーン）のスタイル */
+    .screen {
+      display: none;
+      padding: 10px;
+    }
+    .screen.active {
+      display: block;
     }
     h1, h2, h3, p {
-      margin-bottom: 10px;
+      margin: 10px 0;
     }
     hr {
-      margin: 30px 0;
+      margin: 20px 0;
     }
-    /* 自動切り出し＆フィールド選択モード用 */
+    /* キャンバス等 */
     #pcCanvasContainer, #fsCanvasContainer {
       position: relative;
-      display: inline-block;
+      margin: 0 auto;
     }
+    /* 内部サイズは属性で設定、表示はCSSで100%に */
     #pcCanvas, #fsCanvas {
       border: 1px solid #ccc;
       cursor: crosshair;
-      max-width: 100%;
+      display: block;
+      width: 100%;
       height: auto;
       touch-action: none;
     }
+    /* ボタンとドロップダウンリスト */
+    button, select {
+      margin: 10px 5px;
+      font-size: 1.5em;
+      padding: 0.15em 0.25em;
+    }
+    /* 補正結果画像 */
+    #correctedImage {
+      border: 1px solid #ccc;
+      max-width: 50%;
+      display: block;
+      margin: 10px auto;
+    }
+    /* 入力フィールド */
     .field-group {
       margin-top: 15px;
     }
@@ -35,17 +76,10 @@
       width: 80px;
     }
     input[type="text"] {
-      width: 300px;
+      width: calc(100% - 90px);
       padding: 3px;
     }
-    /* ボタンとドロップダウンリスト（3倍サイズ） */
-    button, select {
-      margin-top: 10px;
-      margin-right: 5px;
-      font-size: 2em;
-      padding: 0.3em 0.5em;
-    }
-    /* 調整中のポイント表示用 */
+    /* 編集用の枠（ポイント） */
     .point {
       position: absolute;
       width: 12px;
@@ -55,91 +89,132 @@
       transform: translate(-50%, -50%);
       pointer-events: none;
     }
+    /* メディアクエリ例 */
+    @media (max-width: 600px) {
+      #header {
+        padding: 8px;
+        font-size: 1.2em;
+      }
+      button, select {
+        font-size: 1.2em;
+        padding: 0.1em 0.2em;
+      }
+      input[type="text"] {
+        font-size: 1em;
+      }
+    }
   </style>
 </head>
 <body>
-  <h1>領収書OCRアプリ</h1>
-  
-  <!-- ① 自動領収書切り出し＆補正モード -->
-  <h2>1. 自動領収書切り出し＆補正</h2>
-  <p>
-    ファイルを選択すると、画像内の輪郭検出により領収書部分が自動で検出され、候補の4点がキャンバス上に表示されます。<br>
-    必要に応じて各ポイントをドラッグして調整し、【ポイント確定】ボタンを押して切り出しを確定してください。
-  </p>
-  <input type="file" id="imageInput" accept="image/*">
-  <div id="pcCanvasContainer">
-    <canvas id="pcCanvas"></canvas>
-  </div>
-  <br>
-  <button id="autoCropButton">自動切り出し＆補正を実行</button>
-  <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
-  <br>
-  <h3>補正結果</h3>
-  <!-- 表示サイズを半分にする -->
-  <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:50%;">
-  <!-- 回転・反転ボタン（手動操作用：今回は自動適用するので表示は不要） -->
-  <div id="transformControls" style="margin-top:10px; display:none;">
-    <button id="rotate90Button">Rotate 90°</button>
-    <button id="rotateNeg90Button">Rotate -90°</button>
-    <button id="flipButton">Flip Horizontally</button>
-  </div>
-  <br>
-  <button id="loadFsButton">この画像でフィールド選択を開始</button>
-  
-  <hr>
-  
-  <!-- ② 領収書各項目のフィールド選択＆OCRモード -->
-  <h2>2. 領収書各項目のフィールド選択＆OCR</h2>
-  <p>
-    補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
-    ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
-    OCR実行時、不要なスペース除去、和暦→西暦変換、金額は数字以外を除去して各領域の数値の合計を算出します。
-  </p>
-  <label for="fieldSelector">対象項目:</label>
-  <select id="fieldSelector">
-    <option value="">--フィールドを選択--</option>
-    <option value="date">日付</option>
-    <option value="amount">金額</option>
-    <option value="payee">支払先</option>
-    <option value="description">摘要</option>
-  </select>
-  <div id="fsCanvasContainer">
-    <canvas id="fsCanvas"></canvas>
-  </div>
-  <br>
-  <button id="fsResetButton">フィールドリセット</button>
-  <button id="fsOcrButton">選択領域でOCR実行</button>
-  <h3>OCR結果</h3>
-  <pre id="ocrOutput"></pre>
-  
-  <div class="field-group">
-    <label for="dateField">日付:</label>
-    <input type="text" id="dateField" placeholder="OCR結果">
-  </div>
-  <div class="field-group">
-    <label for="amountField">金額:</label>
-    <input type="text" id="amountField" placeholder="OCR結果">
-  </div>
-  <div class="field-group">
-    <label for="payeeField">支払先:</label>
-    <input type="text" id="payeeField" placeholder="OCR結果">
-  </div>
-  <div class="field-group">
-    <label for="descriptionField">摘要:</label>
-    <input type="text" id="descriptionField" placeholder="OCR結果">
+  <div id="app">
+    <!-- ヘッダー -->
+    <div id="header">
+      <h1>領収書OCRアプリ</h1>
+    </div>
+    
+    <!-- スクリーン1：画像切り出し＆補正 -->
+    <div id="screen1" class="screen active">
+      <h2>画像切り出し＆補正</h2>
+      <p>画像ファイルを選択し、クロッピング用の編集枠を調整してください。</p>
+      <input type="file" id="imageInput" accept="image/*">
+      <div id="pcCanvasContainer">
+        <canvas id="pcCanvas"></canvas>
+      </div>
+      <button id="autoCropButton">自動切り出し＆補正を実行</button>
+      <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
+      <h3>補正結果</h3>
+      <img id="correctedImage" alt="Corrected Image">
+      <!-- 回転・反転ボタン -->
+      <div id="transformControls" style="margin-top:10px; display:none;">
+        <button id="rotate90Button">Rotate 90°</button>
+        <button id="rotateNeg90Button">Rotate -90°</button>
+        <button id="flipButton">Flip Horizontally</button>
+      </div>
+      <br>
+      <button id="nextToScreen2">次へ</button>
+    </div>
+    
+    <!-- スクリーン2：フィールド選択＆OCR -->
+    <div id="screen2" class="screen">
+      <h2>フィールド選択＆OCR</h2>
+      <p>補正済み画像上で、各フィールドの領域を指定してください。</p>
+      <label for="fieldSelector">対象項目:</label>
+      <select id="fieldSelector">
+        <option value="">--フィールドを選択--</option>
+        <option value="date">日付</option>
+        <option value="amount">金額</option>
+        <option value="payee">支払先</option>
+        <option value="description">摘要</option>
+      </select>
+      <div id="fsCanvasContainer">
+        <canvas id="fsCanvas"></canvas>
+      </div>
+      <button id="fsResetButton">フィールドリセット</button>
+      <button id="fsOcrButton">選択領域でOCR実行</button>
+      <h3>OCR結果</h3>
+      <pre id="ocrOutput"></pre>
+      <div class="field-group">
+        <label for="dateField">日付:</label>
+        <input type="text" id="dateField" placeholder="OCR結果">
+      </div>
+      <div class="field-group">
+        <label for="amountField">金額:</label>
+        <input type="text" id="amountField" placeholder="OCR結果">
+      </div>
+      <div class="field-group">
+        <label for="payeeField">支払先:</label>
+        <input type="text" id="payeeField" placeholder="OCR結果">
+      </div>
+      <div class="field-group">
+        <label for="descriptionField">摘要:</label>
+        <input type="text" id="descriptionField" placeholder="OCR結果">
+      </div>
+      <button id="backToScreen1">戻る</button>
+    </div>
   </div>
   
-  <!-- Tesseract.js 最新安定版 (2.1.5) を読み込む -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
-  <!-- OpenCV.js の読み込み -->
+  <!-- ライブラリ読み込み -->
+  <!-- Tesseract.js 最新版（安定版ではなく最新版） -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.0/dist/tesseract.min.js"></script>
+  <!-- OpenCV.js -->
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    // 以下、これまでのコードと同様の処理
-    let pcScale = 1; // キャンバスに描画される画像のスケール
-    let fsScale = 1; // FSキャンバス用のスケール
-    let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
-    let draggingPointIndex = -1; // ドラッグ中の点のインデックス
+    // 画面遷移用
+    function showScreen(screenId) {
+      const screens = document.querySelectorAll('.screen');
+      screens.forEach(screen => {
+        if (screen.id === screenId) {
+          screen.classList.add('active');
+        } else {
+          screen.classList.remove('active');
+        }
+      });
+      if(screenId === 'screen1') {
+        drawPcCanvasWithPoints();
+      }
+      if(screenId === 'screen2') {
+        drawFsCanvas();
+      }
+    }
+    
+    document.getElementById('nextToScreen2').addEventListener('click', function() {
+      if (!correctedImage.src) {
+        alert("補正結果画像がありません。");
+        return;
+      }
+      showScreen('screen2');
+    });
+    
+    document.getElementById('backToScreen1').addEventListener('click', function() {
+      showScreen('screen1');
+    });
+    
+    // グローバル変数
+    let pcScale = 1;
+    let fsScale = 1;
+    let detectedPoints = [];
+    let draggingPointIndex = -1;
     const AREA_THRESHOLD = 10000;
     
     const pcCanvas = document.getElementById('pcCanvas');
@@ -185,7 +260,7 @@
       let gray = new cv.Mat();
       cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY, 0);
       let blurred = new cv.Mat();
-      cv.GaussianBlur(gray, blurred, new cv.Size(7,7), 0);
+      cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0);
       let edges = new cv.Mat();
       cv.Canny(blurred, edges, 50, 150);
       let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
@@ -261,9 +336,10 @@
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
+      // 5倍大きいポイント（半径35px）を描画
       detectedPoints.forEach(pt => {
         pcCtx.beginPath();
-        pcCtx.arc(pt.x, pt.y, 7, 0, 2 * Math.PI);
+        pcCtx.arc(pt.x, pt.y, 35, 0, 2 * Math.PI);
         pcCtx.fillStyle = "blue";
         pcCtx.fill();
       });
@@ -275,23 +351,26 @@
         }
         pcCtx.closePath();
         pcCtx.strokeStyle = "blue";
-        pcCtx.lineWidth = 2;
+        pcCtx.lineWidth = 10; // 5倍太いライン
         pcCtx.stroke();
       }
     }
     
     autoCropButton.addEventListener('click', autoCrop);
     
+    // 表示サイズと内部サイズの比率を使って座標を変換
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
       const rect = pcCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const scaleX = pcCanvas.width / rect.width;
+      const scaleY = pcCanvas.height / rect.height;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
       draggingPointIndex = -1;
       for (let i = 0; i < 4; i++) {
         let pt = detectedPoints[i];
-        if (Math.hypot(pt.x - x, pt.y - y) < 10) {
+        if (Math.hypot(pt.x - x, pt.y - y) < 35) { // 35pxで検出
           draggingPointIndex = i;
           break;
         }
@@ -302,8 +381,10 @@
       if (draggingPointIndex === -1) return;
       e.preventDefault();
       const rect = pcCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const scaleX = pcCanvas.width / rect.width;
+      const scaleY = pcCanvas.height / rect.height;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
       detectedPoints[draggingPointIndex] = { x, y };
       drawPcCanvasWithPoints();
     });
@@ -361,7 +442,7 @@
       cv.imshow(tempCanvas, dstMat);
       let croppedDataURL = tempCanvas.toDataURL();
       
-      // ここで、補正結果画像を自動的に90度回転＋水平反転させる
+      // 自動で90°回転＋水平反転を適用
       rotateImage(croppedDataURL, 90)
         .then(rotatedDataURL => flipImage(rotatedDataURL))
         .then(finalDataURL => {
@@ -406,7 +487,7 @@
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
           fsFieldRegions[field].forEach(region => {
             fsCtx.strokeStyle = "red";
-            fsCtx.lineWidth = 2;
+            fsCtx.lineWidth = 10; // 太いライン
             fsCtx.strokeRect(region.x, region.y, region.width, region.height);
             fsCtx.fillStyle = "rgba(255,255,255,0.7)";
             fsCtx.fillRect(region.x, region.y - 20, 60, 20);
@@ -417,7 +498,7 @@
         } else {
           const r = fsFieldRegions[field];
           fsCtx.strokeStyle = "red";
-          fsCtx.lineWidth = 2;
+          fsCtx.lineWidth = 10;
           fsCtx.strokeRect(r.x, r.y, r.width, r.height);
           fsCtx.fillStyle = "rgba(255,255,255,0.7)";
           fsCtx.fillRect(r.x, r.y - 20, 50, 20);
@@ -438,8 +519,10 @@
       }
       e.preventDefault();
       const rect = fsCanvas.getBoundingClientRect();
-      fsStartX = e.clientX - rect.left;
-      fsStartY = e.clientY - rect.top;
+      const scaleX = fsCanvas.width / rect.width;
+      const scaleY = fsCanvas.height / rect.height;
+      fsStartX = (e.clientX - rect.left) * scaleX;
+      fsStartY = (e.clientY - rect.top) * scaleY;
       fsIsDrawing = true;
     });
     
@@ -447,11 +530,13 @@
       if (!fsIsDrawing) return;
       e.preventDefault();
       const rect = fsCanvas.getBoundingClientRect();
-      fsCurrentX = e.clientX - rect.left;
-      fsCurrentY = e.clientY - rect.top;
+      const scaleX = fsCanvas.width / rect.width;
+      const scaleY = fsCanvas.height / rect.height;
+      fsCurrentX = (e.clientX - rect.left) * scaleX;
+      fsCurrentY = (e.clientY - rect.top) * scaleY;
       drawFsCanvas();
       fsCtx.strokeStyle = "blue";
-      fsCtx.lineWidth = 2;
+      fsCtx.lineWidth = 10;
       fsCtx.strokeRect(fsStartX, fsStartY, fsCurrentX - fsStartX, fsCurrentY - fsStartY);
     });
     
@@ -460,8 +545,10 @@
       e.preventDefault();
       fsIsDrawing = false;
       const rect = fsCanvas.getBoundingClientRect();
-      fsCurrentX = e.clientX - rect.left;
-      fsCurrentY = e.clientY - rect.top;
+      const scaleX = fsCanvas.width / rect.width;
+      const scaleY = fsCanvas.height / rect.height;
+      fsCurrentX = (e.clientX - rect.left) * scaleX;
+      fsCurrentY = (e.clientY - rect.top) * scaleY;
       const x = Math.min(fsStartX, fsCurrentX);
       const y = Math.min(fsStartY, fsCurrentY);
       const width = Math.abs(fsCurrentX - fsStartX);
@@ -715,7 +802,6 @@
       };
       fsImage.src = storedDataURL;
     });
-    
     // fsImage の再初期化は行わない
   </script>
 </body>
