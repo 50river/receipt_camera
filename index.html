@@ -121,6 +121,9 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
+    let pcScale = 1; // pcCanvas用のスケールファクター
+    let fsScale = 1; // fsCanvas用のスケールファクター
+    
     /*==============================
       ① 画像パースペクティブ補正モード
     ==============================*/
@@ -136,7 +139,7 @@
     const correctedImage = document.getElementById('correctedImage');
     const loadFsButton = document.getElementById('loadFsButton');
     
-    // 画像読み込み
+    // ファイル選択による画像読み込み
     imageInput.addEventListener('change', function(e) {
       if (e.target.files.length > 0) {
         const file = e.target.files[0];
@@ -148,10 +151,16 @@
       }
     });
     
-    // 画像読み込み完了後、pcCanvasに描画
+    // 画像読み込み完了後、デバイス幅に合わせてキャンバスサイズを調整して描画
     pcImage.onload = function() {
-      pcCanvas.width = pcImage.width;
-      pcCanvas.height = pcImage.height;
+      let maxDisplayWidth = window.innerWidth - 40;
+      if (pcImage.width > maxDisplayWidth) {
+        pcScale = maxDisplayWidth / pcImage.width;
+      } else {
+        pcScale = 1;
+      }
+      pcCanvas.width = pcImage.width * pcScale;
+      pcCanvas.height = pcImage.height * pcScale;
       pcPoints = [];
       drawPcCanvas();
     };
@@ -159,15 +168,13 @@
     // pcCanvasに画像と選択ポイントを描画
     function drawPcCanvas() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
-      pcCtx.drawImage(pcImage, 0, 0);
-      // 各ポイントを赤い円で描画
+      pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
       pcPoints.forEach(pt => {
         pcCtx.beginPath();
         pcCtx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI);
         pcCtx.fillStyle = "red";
         pcCtx.fill();
       });
-      // 複数点がある場合、連結線を描画
       if (pcPoints.length > 1) {
         pcCtx.beginPath();
         pcCtx.moveTo(pcPoints[0].x, pcPoints[0].y);
@@ -207,7 +214,6 @@
         alert("4つの角を選択してください。");
         return;
       }
-      // ※ユーザーは「左上、右上、右下、左下」の順で選択したものと仮定
       const widthTop = distance(pcPoints[0], pcPoints[1]);
       const widthBottom = distance(pcPoints[3], pcPoints[2]);
       const maxWidth = Math.max(widthTop, widthBottom);
@@ -215,7 +221,6 @@
       const heightRight = distance(pcPoints[1], pcPoints[2]);
       const maxHeight = Math.max(heightLeft, heightRight);
       
-      // OpenCV.js用ソース点・変換先点を作成
       let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
         pcPoints[0].x, pcPoints[0].y,
         pcPoints[1].x, pcPoints[1].y,
@@ -235,17 +240,14 @@
       let dsize = new cv.Size(maxWidth, maxHeight);
       cv.warpPerspective(srcMat, dstMat, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
       
-      // 結果を一時Canvasに表示してData URLでimgに設定
       let tempCanvas = document.createElement('canvas');
       tempCanvas.width = maxWidth;
       tempCanvas.height = maxHeight;
       cv.imshow(tempCanvas, dstMat);
       correctedImage.src = tempCanvas.toDataURL();
       
-      // メモリ解放
       srcMat.delete(); dstMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
       
-      // 補正結果をFSモード用画像に設定
       fsImage.src = correctedImage.src;
     });
     
@@ -266,12 +268,10 @@
     /*==============================
       ② 領収書各項目のフィールド選択＆OCRモード
     ==============================*/
-    let fsImage = new Image(); // FS用画像（補正済み画像がセットされる）
+    let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
     const fsCtx = fsCanvas.getContext('2d');
     const fsCanvasContainer = document.getElementById('fsCanvasContainer');
-    // fsFieldRegionsは各フィールド名をキーとして管理  
-    // 「amount」は複数選択可能のため、配列として管理する
     let fsFieldRegions = {};  // 例: { date: {x,y,width,height}, amount: [ {x,y,width,height}, ... ], ... }
     
     const fieldSelector = document.getElementById('fieldSelector');
@@ -283,20 +283,24 @@
     const payeeField = document.getElementById('payeeField');
     const descriptionField = document.getElementById('descriptionField');
     
-    // fsImage読み込み後、fsCanvasに描画
+    // fsImage読み込み後、デバイス幅に合わせてfsCanvasに描画
     fsImage.onload = function() {
-      fsCanvas.width = fsImage.width;
-      fsCanvas.height = fsImage.height;
-      fsFieldRegions = {};  // リセット
+      let maxDisplayWidth = window.innerWidth - 40;
+      if (fsImage.width > maxDisplayWidth) {
+        fsScale = maxDisplayWidth / fsImage.width;
+      } else {
+        fsScale = 1;
+      }
+      fsCanvas.width = fsImage.width * fsScale;
+      fsCanvas.height = fsImage.height * fsScale;
+      fsFieldRegions = {};
       drawFsCanvas();
     };
     
-    // fsCanvasに画像と選択済み領域を描画
     function drawFsCanvas() {
       fsCtx.clearRect(0, 0, fsCanvas.width, fsCanvas.height);
-      fsCtx.drawImage(fsImage, 0, 0);
+      fsCtx.drawImage(fsImage, 0, 0, fsCanvas.width, fsCanvas.height);
       for (const field in fsFieldRegions) {
-        // 金額フィールドは複数選択可能（配列として管理）
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
           fsFieldRegions[field].forEach(region => {
             fsCtx.strokeStyle = "red";
@@ -322,7 +326,6 @@
       }
     }
     
-    // FSモード：マウスによる領域選択
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
@@ -361,7 +364,6 @@
       if (width === 0 || height === 0) return;
       const field = fieldSelector.value;
       if (field === "amount") {
-        // 金額は複数選択可能：配列として保存
         if (!fsFieldRegions[field]) {
           fsFieldRegions[field] = [];
         }
@@ -372,23 +374,19 @@
       drawFsCanvas();
     });
     
-    // FS Reset ボタン
     fsResetButton.addEventListener('click', function() {
       fsFieldRegions = {};
       drawFsCanvas();
     });
     
-    // FS OCR: 各フィールド領域ごとにOCR実行（後処理付き）
     fsOcrButton.addEventListener('click', function() {
       ocrOutput.textContent = "各領域のOCR処理中…\n";
       const tasks = [];
       for (const field in fsFieldRegions) {
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
-          // 金額は複数領域の場合、各領域ごとにOCRを実行し合計を算出
           let amountPromises = fsFieldRegions[field].map(region => performOCROnField("amount", region));
           tasks.push(
             Promise.all(amountPromises).then(results => {
-              // 各結果からprocessAmountFieldで数字部分のみ抽出し、数値に変換して合計
               let total = results.reduce((sum, text) => {
                 let num = parseInt(processAmountField(text), 10);
                 return sum + (isNaN(num) ? 0 : num);
@@ -401,7 +399,6 @@
           tasks.push(
             performOCROnField(field, fsFieldRegions[field])
               .then(resultText => {
-                // 不要スペースは削除済みと仮定
                 if (field === "date") {
                   resultText = processDateField(resultText);
                   dateField.value = resultText;
@@ -420,7 +417,6 @@
       });
     });
     
-    // FS領域に対してOCRを実行する関数（Tesseract.js利用）
     function performOCROnField(field, region) {
       return new Promise((resolve, reject) => {
         const tempCanvas = document.createElement('canvas');
@@ -440,7 +436,7 @@
             tessedit_pageseg_mode: 6
           }
         ).then(({ data: { text } }) => {
-          // 丸囲み数字の置換
+          // 下記の関数を更新（0～12まで対応）
           const processedText = replaceCircledNumbers(text).trim();
           resolve(processedText);
         }).catch(err => {
@@ -450,35 +446,29 @@
       });
     }
     
-    // --- 以下、後処理用関数 ---
-    
-    // 丸囲み数字を通常の数字に置換する関数
+    // ★ 更新：丸囲み数字を通常の数字に置換する関数（0～12まで対応）
     function replaceCircledNumbers(text) {
       const mapping = {
         '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4',
-        '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9', '⑩': '10'
+        '⑤': '5', '⑥': '6', '⑦': '7', '⑧': '8', '⑨': '9',
+        '⑩': '10', '⑪': '11', '⑫': '12'
       };
-      return text.replace(/[⓪①②③④⑤⑥⑦⑧⑨⑩]/g, function(match) {
+      return text.replace(/[⓪①②③④⑤⑥⑦⑧⑨⑩⑪⑫]/g, function(match) {
         return mapping[match] || match;
       });
     }
     
-    // 日付フィールド用後処理：不要スペース除去＋和暦→西暦変換
     function processDateField(text) {
-      // ここでは既にスペースは除去済みと仮定
       if (text.includes("令和") || text.includes("平成") || text.includes("昭和")) {
         return convertJapaneseEra(text);
       }
       return text;
     }
     
-    // 金額フィールド用後処理：記号や文字を除去して数字のみ抽出
     function processAmountField(text) {
-      return text.replace(/\D/g, "");  // 数字以外をすべて除去
+      return text.replace(/\D/g, "");
     }
     
-    // 和暦表記を西暦表記に変換する関数  
-    // 例: "令和元年8月5日" → "2019年8月5日"、"平成31年4月30日" → "2019年4月30日"
     function convertJapaneseEra(dateStr) {
       let match = dateStr.match(/(令和|平成|昭和)(元|\d+)[年](\d{1,2})[月](\d{1,2})[日]/);
       if (match) {
@@ -487,9 +477,9 @@
         let month = match[3];
         let day = match[4];
         let offset = 0;
-        if (era === "令和") offset = 2018;  // 令和元年 = 2019
-        else if (era === "平成") offset = 1988; // 平成元年 = 1989
-        else if (era === "昭和") offset = 1925; // 昭和元年 = 1926
+        if (era === "令和") offset = 2018;
+        else if (era === "平成") offset = 1988;
+        else if (era === "昭和") offset = 1925;
         let year;
         if (yearPart === "元") {
           year = offset + 1;
