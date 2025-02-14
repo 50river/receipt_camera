@@ -42,7 +42,7 @@
       margin-top: 10px;
       margin-right: 5px;
     }
-    /* 調整中のポイント用 */
+    /* 調整中のポイント表示用 */
     .point {
       position: absolute;
       width: 12px;
@@ -60,7 +60,7 @@
   <!-- ① 自動領収書切り出し＆補正モード -->
   <h2>1. 自動領収書切り出し＆補正</h2>
   <p>
-    ファイルを選択すると、画像内の輪郭検出により領収書部分が自動で検出され、候補の4点が表示されます。<br>
+    ファイルを選択すると、画像内の輪郭検出により領収書部分が自動で検出され、候補の4点がキャンバス上に表示されます。<br>
     必要に応じて各ポイントをドラッグして調整し、【ポイント確定】ボタンを押して切り出しを確定してください。
   </p>
   <input type="file" id="imageInput" accept="image/*">
@@ -83,7 +83,7 @@
   <p>
     補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
     ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
-    OCR実行時、不要なスペース除去、日付は和暦→西暦変換、金額は数字以外を除去し、各領域の数値の合計を算出します。
+    OCR実行時、不要なスペース除去、和暦→西暦変換、金額は数字以外を除去して各領域の数値合計を算出します。
   </p>
   <label for="fieldSelector">対象項目:</label>
   <select id="fieldSelector">
@@ -126,7 +126,7 @@
   <script>
     let pcScale = 1; // pcCanvas用スケール
     let fsScale = 1; // fsCanvas用スケール
-    let detectedPoints = []; // 自動検出された4点（元画像座標）
+    let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
     const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
     
@@ -165,32 +165,23 @@
       confirmPointsButton.style.display = "none";
     };
     
-    // 自動切り出し＆補正：輪郭検出＋モルフォロジー処理＋パースペクティブ変換
+    // 自動切り出し＆候補4点検出（前処理にモルフォロジー処理を追加）
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
         return;
       }
       let srcMat = cv.imread(pcCanvas);
-      
-      // グレースケール変換
       let gray = new cv.Mat();
       cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY, 0);
-      
-      // ガウシアンブラー（7x7）
       let blurred = new cv.Mat();
       cv.GaussianBlur(gray, blurred, new cv.Size(7,7), 0);
-      
-      // Cannyエッジ検出（閾値 50, 150）
       let edges = new cv.Mat();
       cv.Canny(blurred, edges, 50, 150);
-      
-      // 膨張処理でエッジを強調
       let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
       let dilated = new cv.Mat();
       cv.dilate(edges, dilated, kernel);
       
-      // 輪郭検出
       let contours = new cv.MatVector();
       let hierarchy = new cv.Mat();
       cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
@@ -230,7 +221,7 @@
         return;
       }
       
-      // 検出された4点を取得（元画像座標）
+      // 検出された4点を取得（キャンバス座標系）
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
         detectedPoints.push({
@@ -240,21 +231,27 @@
       }
       bestContour.delete();
       
-      // 整列（簡易的に左上、右上、右下、左下）
-      detectedPoints.sort((a, b) => (a.x + a.y) - (b.x + b.y));
-      let tl = detectedPoints[0];
-      let br = detectedPoints[3];
-      let remaining = [detectedPoints[1], detectedPoints[2]];
-      remaining.sort((a, b) => a.x - b.x);
-      let bl = remaining[0];
-      let tr = remaining[1];
-      detectedPoints = [tl, tr, br, bl];
+      // 順序付けをより堅牢にするために、sum と diff を利用
+      detectedPoints = orderPoints(detectedPoints);
       
-      console.log("検出された4点:", detectedPoints);
+      console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
       confirmPointsButton.style.display = "inline-block";
       
       srcMat.delete();
+    }
+    
+    // 4点を [tl, tr, br, bl] の順に整列する関数
+    function orderPoints(pts) {
+      // tl: min(x+y), br: max(x+y)
+      // tr: min(x-y), bl: max(x-y)
+      let sumArr = pts.map(p => p.x + p.y);
+      let diffArr = pts.map(p => p.x - p.y);
+      let tl = pts[sumArr.indexOf(Math.min(...sumArr))];
+      let br = pts[sumArr.indexOf(Math.max(...sumArr))];
+      let tr = pts[diffArr.indexOf(Math.min(...diffArr))];
+      let bl = pts[diffArr.indexOf(Math.max(...diffArr))];
+      return [tl, tr, br, bl];
     }
     
     function drawPcCanvasWithPoints() {
@@ -262,7 +259,6 @@
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
       detectedPoints.forEach(pt => {
         pcCtx.beginPath();
-        // 検出された点は元画像座標なので、pcScaleで表示用に調整
         pcCtx.arc(pt.x * pcScale, pt.y * pcScale, 7, 0, 2 * Math.PI);
         pcCtx.fillStyle = "blue";
         pcCtx.fill();
@@ -282,17 +278,17 @@
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // ドラッグでポイント調整
+    // ドラッグでポイントを調整（キャンバス座標系）
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
       const rect = pcCanvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / pcScale;
-      const y = (e.clientY - rect.top) / pcScale;
+      const x = (e.clientX - rect.left);
+      const y = (e.clientY - rect.top);
       draggingPointIndex = -1;
       for (let i = 0; i < 4; i++) {
         let pt = detectedPoints[i];
-        if (Math.hypot(pt.x - x, pt.y - y) < 10) {
+        if (Math.hypot(pt.x * pcScale - x, pt.y * pcScale - y) < 10) {
           draggingPointIndex = i;
           break;
         }
@@ -303,9 +299,10 @@
       if (draggingPointIndex === -1) return;
       e.preventDefault();
       const rect = pcCanvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / pcScale;
-      const y = (e.clientY - rect.top) / pcScale;
-      detectedPoints[draggingPointIndex] = { x, y };
+      const x = (e.clientX - rect.left);
+      const y = (e.clientY - rect.top);
+      // 変換：キャンバス座標 → 元画像座標
+      detectedPoints[draggingPointIndex] = { x: x / pcScale, y: y / pcScale };
       drawPcCanvasWithPoints();
     });
     
@@ -314,7 +311,7 @@
       draggingPointIndex = -1;
     });
     
-    // ポイント確定で最終的なパースペクティブ補正を実行
+    // 確定ボタンで最終的なパースペクティブ補正を実行
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
