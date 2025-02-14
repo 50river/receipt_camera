@@ -239,7 +239,7 @@
       }
       bestContour.delete();
       
-      // 座標の順序付けを堅牢に
+      // 座標の順序付けを堅牢に（tl, tr, br, bl）
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
@@ -248,7 +248,7 @@
       srcMat.delete();
     }
     
-    // 4点を [tl, tr, br, bl] の順に整列する関数（元画像の座標に対応）
+    // 4点を [tl, tr, br, bl] の順に整列する関数
     function orderPoints(pts) {
       let sumArr = pts.map(p => p.x + p.y);
       let diffArr = pts.map(p => p.x - p.y);
@@ -315,13 +315,13 @@
       draggingPointIndex = -1;
     });
     
-    // ポイント確定ボタン：ユーザー調整後の4点を用いて元画像座標に変換してパースペクティブ補正を実施
+    // ポイント確定ボタン：ユーザー調整後の4点をもとに、元画像座標に変換してパースペクティブ補正を実施
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      // キャンバス上の座標はすでに表示時の値なので、元画像座標に戻すために pcScale で割る
+      // キャンバス上の座標はスケール済みなので、元画像の座標に戻す
       let ptsOriginal = detectedPoints.map(pt => ({ x: pt.x / pcScale, y: pt.y / pcScale }));
       ptsOriginal = orderPoints(ptsOriginal);
       let [tl, tr, br, bl] = ptsOriginal;
@@ -528,7 +528,7 @@
     
     function performOCROnField(field, region) {
       return new Promise((resolve, reject) => {
-        // ここでfsFieldRegionsはキャンバス上の座標なので、元画像（fsImage）の座標に変換する
+        // fsFieldRegionsはキャンバス上の座標なので、元画像(fsImage)の座標に変換
         let originalX = region.x / fsScale;
         let originalY = region.y / fsScale;
         let originalWidth = region.width / fsScale;
@@ -639,7 +639,6 @@
     /*==============================
       追加機能：画像の回転・反転
     ==============================*/
-    
     const rotate90Button = document.getElementById('rotate90Button');
     const rotateNeg90Button = document.getElementById('rotateNeg90Button');
     const flipButton = document.getElementById('flipButton');
@@ -710,7 +709,29 @@
       });
     }
     
-    // ※ transformControls（回転・反転ボタン）は、補正結果画像下に表示される
+    /*==============================
+      loadFsButton の処理：内部で画像を保存して再読み込み
+    ==============================*/
+    loadFsButton.addEventListener('click', function() {
+      if (!correctedImage.src) {
+        alert("まず、補正を実行してください。");
+        return;
+      }
+      // 内部で一度保存（ここではデータURLとして取得）し、キャッシュ回避用にタイムスタンプを付与して再読み込み
+      let storedDataURL = correctedImage.src + "?t=" + new Date().getTime();
+      fsImage = new Image();
+      fsImage.onload = function() {
+        // fsImage の読み込みが完了したら、fsCanvas用に描画
+        fsScale = (fsImage.width > (window.innerWidth - 40)) ? ((window.innerWidth - 40) / fsImage.width) : 1;
+        fsCanvas.width = fsImage.width * fsScale;
+        fsCanvas.height = fsImage.height * fsScale;
+        drawFsCanvas();
+      };
+      fsImage.src = storedDataURL;
+    });
+    
+    fsImage = new Image(); // fsImage を初期化
+    
   </script>
 </body>
 </html>
