@@ -38,9 +38,12 @@
       width: 300px;
       padding: 3px;
     }
+    /* ボタンとドロップダウンリストのサイズを3倍程度に調整 */
     button, select {
       margin-top: 10px;
       margin-right: 5px;
+      font-size: 3em;
+      padding: 0.3em 0.5em;
     }
     /* 調整中のポイント表示用 */
     .point {
@@ -72,7 +75,7 @@
   <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
   <br>
   <h3>補正結果</h3>
-  <!-- 表示サイズを半分に -->
+  <!-- 表示サイズを半分にする -->
   <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:50%;">
   <!-- 回転・反転ボタン -->
   <div id="transformControls" style="margin-top:10px; display:none;">
@@ -335,7 +338,7 @@
       let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
       let maxHeight = Math.max(heightA, heightB);
       
-      // オフスクリーンキャンバスに元画像（pcImage）の元解像度で描画
+      // 元画像をオフスクリーンキャンバスに描画（元の解像度）
       let offCanvas = document.createElement('canvas');
       offCanvas.width = pcImage.width;
       offCanvas.height = pcImage.height;
@@ -718,7 +721,7 @@
         alert("まず、補正を実行してください。");
         return;
       }
-      // データURLにタイムスタンプ付与してキャッシュ回避
+      // 内部で一度保存（データURLとして取得）し、キャッシュ回避用にタイムスタンプを付与
       let storedDataURL = correctedImage.src + "?t=" + new Date().getTime();
       console.log("loadFsButton: storedDataURL =", storedDataURL);
       fsImage.onload = function() {
@@ -731,7 +734,7 @@
       fsImage.src = storedDataURL;
     });
     
-    // fsImage の再初期化は行わず、loadFsButton の処理内でのみ設定
+    // fsImage の再初期化はここでは行わない
   </script>
 </body>
 </html>
