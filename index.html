@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（個別OCR＋2値化＋複数金額対応）</title>
+  <title>領収書OCRアプリ（2値化追加版）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -16,11 +16,23 @@
       margin: 30px 0;
     }
     /* ① パースペクティブ補正モード用 */
-    #pcCanvasContainer, #fsCanvasContainer {
+    #pcCanvasContainer {
       position: relative;
       display: inline-block;
     }
-    #pcCanvas, #fsCanvas {
+    #pcCanvas {
+      border: 1px solid #ccc;
+      cursor: crosshair;
+      max-width: 100%;
+      height: auto;
+      touch-action: none;
+    }
+    /* ② フィールド選択モード用 */
+    #fsCanvasContainer {
+      position: relative;
+      display: inline-block;
+    }
+    #fsCanvas {
       border: 1px solid #ccc;
       cursor: crosshair;
       max-width: 100%;
@@ -51,7 +63,7 @@
   <h2>1. 画像パースペクティブ補正</h2>
   <p>
     ファイルを選択し、画像上で領収書の4隅（左上、右上、右下、左下）の順にクリックしてください。<br>
-    （クリックすると赤い円が表示され、連結線で示されます。）
+    （クリックすると赤い円が表示され、順次線で連結されます。）
   </p>
   <input type="file" id="imageInput" accept="image/*">
   <div id="pcCanvasContainer">
@@ -73,7 +85,7 @@
   <p>
     補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
     ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
-    OCR実行時、不要なスペース除去、日付は和暦→西暦変換、金額は記号除去して各領域の数値合計を算出します。
+    OCR実行時、不要なスペース除去、日付は和暦表記があれば西暦に変換、金額は数字以外を除去し、各領域の数値の合計を算出して表示します。
   </p>
   <label for="fieldSelector">対象項目:</label>
   <select id="fieldSelector">
@@ -114,15 +126,16 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    let pcScale = 1; // pcCanvas用スケール
-    let fsScale = 1; // fsCanvas用スケール
+    let pcScale = 1; // pcCanvas用のスケールファクター
+    let fsScale = 1; // fsCanvas用のスケールファクター
     
     /*==============================
       ① 画像パースペクティブ補正モード
     ==============================*/
-    let pcPoints = [];  // 4点（{x, y}）
+    let pcPoints = [];  // 4点（{x, y}）を格納
     const pcCanvas = document.getElementById('pcCanvas');
     const pcCtx = pcCanvas.getContext('2d');
+    const pcCanvasContainer = document.getElementById('pcCanvasContainer');
     let pcImage = new Image();
     
     const imageInput = document.getElementById('imageInput');
@@ -144,7 +157,11 @@
     
     pcImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
-      pcScale = (pcImage.width > maxDisplayWidth) ? (maxDisplayWidth / pcImage.width) : 1;
+      if (pcImage.width > maxDisplayWidth) {
+        pcScale = maxDisplayWidth / pcImage.width;
+      } else {
+        pcScale = 1;
+      }
       pcCanvas.width = pcImage.width * pcScale;
       pcCanvas.height = pcImage.height * pcScale;
       pcPoints = [];
@@ -250,6 +267,7 @@
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
     const fsCtx = fsCanvas.getContext('2d');
+    const fsCanvasContainer = document.getElementById('fsCanvasContainer');
     let fsFieldRegions = {};  // 例: { date: {x,y,width,height}, amount: [ {x,y,width,height}, ... ], ... }
     
     const fieldSelector = document.getElementById('fieldSelector');
@@ -263,7 +281,11 @@
     
     fsImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
-      fsScale = (fsImage.width > maxDisplayWidth) ? (maxDisplayWidth / fsImage.width) : 1;
+      if (fsImage.width > maxDisplayWidth) {
+        fsScale = maxDisplayWidth / fsImage.width;
+      } else {
+        fsScale = 1;
+      }
       fsCanvas.width = fsImage.width * fsScale;
       fsCanvas.height = fsImage.height * fsScale;
       fsFieldRegions = {};
@@ -299,7 +321,7 @@
       }
     }
     
-    // Pointer Events で FSモードのフィールド選択（タッチ・マウス対応）
+    // Pointer Events を使って FSモードのフィールド選択（タッチ・マウス対応）
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
@@ -402,7 +424,7 @@
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(fsImage, region.x, region.y, region.width, region.height, 0, 0, region.width, region.height);
         const croppedDataURL = tempCanvas.toDataURL();
-        // 2値化処理を追加してOCR前処理
+        // 2値化処理を行う
         binarizeImage(croppedDataURL).then(binarizedDataURL => {
           Tesseract.recognize(
             binarizedDataURL,
@@ -427,7 +449,7 @@
       });
     }
     
-    // 画像の2値化（グレースケール＋閾値処理）
+    // 新規追加：画像の2値化処理（グレースケール変換＋閾値処理）
     function binarizeImage(dataURL) {
       return new Promise((resolve, reject) => {
         let img = new Image();
@@ -441,6 +463,7 @@
           let gray = new cv.Mat();
           cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
           let binary = new cv.Mat();
+          // 閾値 128 で2値化（必要に応じて調整）
           cv.threshold(gray, binary, 128, 255, cv.THRESH_BINARY);
           cv.imshow(canvas, binary);
           let resultDataURL = canvas.toDataURL();
@@ -454,7 +477,6 @@
       });
     }
     
-    // 0～12までの丸囲み数字を通常の数字に置換する関数
     function replaceCircledNumbers(text) {
       const mapping = {
         '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4',
