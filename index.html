@@ -22,6 +22,8 @@
     #pcCanvas {
       border: 1px solid #ccc;
       cursor: crosshair;
+      max-width: 100%; /* CSSでも横幅を超えないように */
+      height: auto;
     }
     /* ② フィールド選択モード用 */
     #fsCanvasContainer {
@@ -31,6 +33,8 @@
     #fsCanvas {
       border: 1px solid #ccc;
       cursor: crosshair;
+      max-width: 100%;
+      height: auto;
     }
     .field-group {
       margin-top: 15px;
@@ -76,7 +80,7 @@
   <!-- ② 領収書各項目のフィールド選択＆OCRモード -->
   <h2>2. 領収書各項目のフィールド選択＆OCR</h2>
   <p>
-    補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグで指定してください。<br>
+    補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
     ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
     OCR実行時、不要なスペース除去、日付は和暦表記があれば西暦に変換、金額は数字以外を除去し、各領域の数値の合計を算出して表示します。
   </p>
@@ -115,9 +119,7 @@
   </div>
   
   <!-- ライブラリ読み込み -->
-  <!-- Tesseract.js v6.0.0 (tessdata_best 日本語モデル利用) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.0/dist/tesseract.min.js"></script>
-  <!-- OpenCV.js（非同期読み込み） -->
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
@@ -139,7 +141,6 @@
     const correctedImage = document.getElementById('correctedImage');
     const loadFsButton = document.getElementById('loadFsButton');
     
-    // ファイル選択による画像読み込み
     imageInput.addEventListener('change', function(e) {
       if (e.target.files.length > 0) {
         const file = e.target.files[0];
@@ -151,7 +152,6 @@
       }
     });
     
-    // 画像読み込み完了後、デバイス幅に合わせてキャンバスサイズを調整して描画
     pcImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
       if (pcImage.width > maxDisplayWidth) {
@@ -165,7 +165,6 @@
       drawPcCanvas();
     };
     
-    // pcCanvasに画像と選択ポイントを描画
     function drawPcCanvas() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
@@ -187,7 +186,6 @@
       }
     }
     
-    // pcCanvasクリックで4点取得（最大4点）
     pcCanvas.addEventListener('click', function(e) {
       if (pcPoints.length >= 4) return;
       const rect = pcCanvas.getBoundingClientRect();
@@ -197,18 +195,15 @@
       drawPcCanvas();
     });
     
-    // 「ポイントリセット」ボタン
     pcResetButton.addEventListener('click', function() {
       pcPoints = [];
       drawPcCanvas();
     });
     
-    // OpenCV.js準備完了コールバック
     function onOpenCvReady() {
       console.log("OpenCV.js is ready.");
     }
     
-    // 「補正を実行」ボタン：4点選択済みならパースペクティブ補正
     pcApplyButton.addEventListener('click', function() {
       if (pcPoints.length < 4) {
         alert("4つの角を選択してください。");
@@ -251,12 +246,10 @@
       fsImage.src = correctedImage.src;
     });
     
-    // 2点間の距離計算ユーティリティ
     function distance(p1, p2) {
       return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
     }
     
-    // 「この画像でフィールド選択を開始」ボタン：FSモードへ切替
     loadFsButton.addEventListener('click', function() {
       if (!correctedImage.src) {
         alert("まず、補正を実行してください。");
@@ -283,7 +276,6 @@
     const payeeField = document.getElementById('payeeField');
     const descriptionField = document.getElementById('descriptionField');
     
-    // fsImage読み込み後、デバイス幅に合わせてfsCanvasに描画
     fsImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
       if (fsImage.width > maxDisplayWidth) {
@@ -325,6 +317,53 @@
         }
       }
     }
+    
+    // タッチイベントにも対応（FSモード）
+    fsCanvas.addEventListener('touchstart', function(e) {
+      if (!fieldSelector.value) {
+        alert("まずは対象項目を選択してください。");
+        return;
+      }
+      e.preventDefault();
+      const rect = fsCanvas.getBoundingClientRect();
+      fsStartX = e.touches[0].clientX - rect.left;
+      fsStartY = e.touches[0].clientY - rect.top;
+      fsIsDrawing = true;
+    });
+    fsCanvas.addEventListener('touchmove', function(e) {
+      if (!fsIsDrawing) return;
+      e.preventDefault();
+      const rect = fsCanvas.getBoundingClientRect();
+      fsCurrentX = e.touches[0].clientX - rect.left;
+      fsCurrentY = e.touches[0].clientY - rect.top;
+      drawFsCanvas();
+      fsCtx.strokeStyle = "blue";
+      fsCtx.lineWidth = 2;
+      fsCtx.strokeRect(fsStartX, fsStartY, fsCurrentX - fsStartX, fsCurrentY - fsStartY);
+    });
+    fsCanvas.addEventListener('touchend', function(e) {
+      if (!fsIsDrawing) return;
+      fsIsDrawing = false;
+      const rect = fsCanvas.getBoundingClientRect();
+      // touchendはchangedTouchesを使う
+      fsCurrentX = e.changedTouches[0].clientX - rect.left;
+      fsCurrentY = e.changedTouches[0].clientY - rect.top;
+      const x = Math.min(fsStartX, fsCurrentX);
+      const y = Math.min(fsStartY, fsCurrentY);
+      const width = Math.abs(fsCurrentX - fsStartX);
+      const height = Math.abs(fsCurrentY - fsStartY);
+      if (width === 0 || height === 0) return;
+      const field = fieldSelector.value;
+      if (field === "amount") {
+        if (!fsFieldRegions[field]) {
+          fsFieldRegions[field] = [];
+        }
+        fsFieldRegions[field].push({ x, y, width, height });
+      } else {
+        fsFieldRegions[field] = { x, y, width, height };
+      }
+      drawFsCanvas();
+    });
     
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
@@ -436,7 +475,6 @@
             tessedit_pageseg_mode: 6
           }
         ).then(({ data: { text } }) => {
-          // 下記の関数を更新（0～12まで対応）
           const processedText = replaceCircledNumbers(text).trim();
           resolve(processedText);
         }).catch(err => {
@@ -446,7 +484,7 @@
       });
     }
     
-    // ★ 更新：丸囲み数字を通常の数字に置換する関数（0～12まで対応）
+    // ★ 0～12までの丸囲み数字を通常の数字に置換する関数
     function replaceCircledNumbers(text) {
       const mapping = {
         '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4',
