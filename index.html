@@ -2,9 +2,8 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（パースペクティブ補正＋各項目選択・OCR／後処理＋複数金額対応）</title>
+  <title>領収書OCRアプリ（2値化追加版）</title>
   <style>
-    /* body に overscroll-behavior を追加してスクロール抑制 */
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
@@ -26,7 +25,7 @@
       cursor: crosshair;
       max-width: 100%;
       height: auto;
-      touch-action: none; /* タッチ時のスクロール抑制 */
+      touch-action: none;
     }
     /* ② フィールド選択モード用 */
     #fsCanvasContainer {
@@ -38,7 +37,7 @@
       cursor: crosshair;
       max-width: 100%;
       height: auto;
-      touch-action: none; /* タッチ時のスクロール抑制 */
+      touch-action: none;
     }
     .field-group {
       margin-top: 15px;
@@ -425,27 +424,59 @@
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(fsImage, region.x, region.y, region.width, region.height, 0, 0, region.width, region.height);
         const croppedDataURL = tempCanvas.toDataURL();
-        
-        Tesseract.recognize(
-          croppedDataURL,
-          'jpn',
-          {
-            langPath: 'https://tessdata.projectnaptha.com/4.0.0_best/',
-            logger: m => console.log(field, m),
-            tessedit_char_whitelist: '0123456789年月日-/： ',
-            tessedit_pageseg_mode: 6
-          }
-        ).then(({ data: { text } }) => {
-          const processedText = replaceCircledNumbers(text).trim();
-          resolve(processedText);
+        // 2値化処理を行う
+        binarizeImage(croppedDataURL).then(binarizedDataURL => {
+          Tesseract.recognize(
+            binarizedDataURL,
+            'jpn',
+            {
+              langPath: 'https://tessdata.projectnaptha.com/4.0.0_best/',
+              logger: m => console.log(field, m),
+              tessedit_char_whitelist: '0123456789年月日-/： ',
+              tessedit_pageseg_mode: 6
+            }
+          ).then(({ data: { text } }) => {
+            const processedText = replaceCircledNumbers(text).trim();
+            resolve(processedText);
+          }).catch(err => {
+            console.error(field, err);
+            resolve("エラー");
+          });
         }).catch(err => {
-          console.error(field, err);
+          console.error("Binarization error", err);
           resolve("エラー");
         });
       });
     }
     
-    // 0～12までの丸囲み数字を通常の数字に置換する関数
+    // 新規追加：画像の2値化処理（グレースケール変換＋閾値処理）
+    function binarizeImage(dataURL) {
+      return new Promise((resolve, reject) => {
+        let img = new Image();
+        img.onload = function() {
+          let canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          let ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          let src = cv.imread(canvas);
+          let gray = new cv.Mat();
+          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+          let binary = new cv.Mat();
+          // 閾値 128 で2値化（必要に応じて調整）
+          cv.threshold(gray, binary, 128, 255, cv.THRESH_BINARY);
+          cv.imshow(canvas, binary);
+          let resultDataURL = canvas.toDataURL();
+          src.delete(); gray.delete(); binary.delete();
+          resolve(resultDataURL);
+        };
+        img.onerror = function(err) {
+          reject(err);
+        };
+        img.src = dataURL;
+      });
+    }
+    
     function replaceCircledNumbers(text) {
       const mapping = {
         '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4',
