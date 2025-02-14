@@ -72,7 +72,7 @@
   <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
   <br>
   <h3>補正結果</h3>
-  <!-- 表示サイズを半分にするため max-width を50% に設定 -->
+  <!-- 表示サイズを半分にする -->
   <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:50%;">
   <!-- 回転・反転ボタン -->
   <div id="transformControls" style="margin-top:10px; display:none;">
@@ -131,8 +131,8 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    let pcScale = 1; // キャンバスに描画される画像のスケール
-    let fsScale = 1; // FSキャンバス用のスケール
+    let pcScale = 1; // キャンバス表示用スケール
+    let fsScale = 1; // FSキャンバス用スケール
     let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
     const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
@@ -240,7 +240,7 @@
       }
       bestContour.delete();
       
-      // 座標の順序付けを堅牢に（tl, tr, br, bl）
+      // 座標の順序付け（堅牢な方法）
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
@@ -316,13 +316,13 @@
       draggingPointIndex = -1;
     });
     
-    // ポイント確定ボタン：ユーザー調整後の4点を元画像座標に変換してパースペクティブ補正を実施
+    // ポイント確定ボタン：キャンバス上の座標から元画像座標に変換してパースペクティブ補正
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      // キャンバス上の座標はスケール済みなので、元画像座標に戻す
+      // キャンバス上の座標はスケール済みなので、元画像の座標に戻す
       let ptsOriginal = detectedPoints.map(pt => ({ x: pt.x / pcScale, y: pt.y / pcScale }));
       ptsOriginal = orderPoints(ptsOriginal);
       let [tl, tr, br, bl] = ptsOriginal;
@@ -335,7 +335,7 @@
       let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
       let maxHeight = Math.max(heightA, heightB);
       
-      // 元画像をオフスクリーンキャンバスに描画（元の解像度）
+      // オフスクリーンキャンバスに元画像（pcImage）の元解像度で描画
       let offCanvas = document.createElement('canvas');
       offCanvas.width = pcImage.width;
       offCanvas.height = pcImage.height;
@@ -432,7 +432,7 @@
       }
     }
     
-    // Pointer Events で FSモードのフィールド選択（タッチ・マウス対応）
+    // Pointer Events によるフィールド選択（タッチ・マウス対応）
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
@@ -711,13 +711,14 @@
     }
     
     /*==============================
-      loadFsButton の処理：画像を内部で保存して再読み込み
+      loadFsButton の処理：内部で画像を保存して再読み込み
     ==============================*/
     loadFsButton.addEventListener('click', function() {
       if (!correctedImage.src) {
         alert("まず、補正を実行してください。");
         return;
       }
+      // 内部で一度保存（データURL）し、キャッシュ回避のためタイムスタンプを付与
       let storedDataURL = correctedImage.src + "?t=" + new Date().getTime();
       fsImage = new Image();
       fsImage.onload = function() {
@@ -729,7 +730,7 @@
       fsImage.src = storedDataURL;
     });
     
-    fsImage = new Image(); // fsImage を初期化
+    // ※ fsImage の再初期化は不要（削除済み）
   </script>
 </body>
 </html>
