@@ -42,7 +42,7 @@
       margin-top: 10px;
       margin-right: 5px;
     }
-    /* 調整中のポイントのスタイル */
+    /* 調整中のポイント用 */
     .point {
       position: absolute;
       width: 12px;
@@ -83,7 +83,7 @@
   <p>
     補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
     ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
-    OCR実行時、不要なスペース除去、日付は和暦→西暦変換、金額は記号除去して各領域の数値合計を算出します。
+    OCR実行時、不要なスペース除去、日付は和暦→西暦変換、金額は数字以外を除去し、各領域の数値の合計を算出します。
   </p>
   <label for="fieldSelector">対象項目:</label>
   <select id="fieldSelector">
@@ -128,9 +128,7 @@
     let fsScale = 1; // fsCanvas用スケール
     let detectedPoints = []; // 自動検出された4点（元画像座標）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
-    
-    // 調整用パラメータ（必要に応じて変更してください）
-    const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（画像サイズによっては下げる）
+    const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
     
     /*==============================
       ① 自動領収書切り出し＆補正モード
@@ -167,22 +165,35 @@
       confirmPointsButton.style.display = "none";
     };
     
-    // 自動切り出し＆候補4点検出
+    // 自動切り出し＆補正：輪郭検出＋モルフォロジー処理＋パースペクティブ変換
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
         return;
       }
       let srcMat = cv.imread(pcCanvas);
+      
+      // グレースケール変換
       let gray = new cv.Mat();
       cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY, 0);
+      
+      // ガウシアンブラー（7x7）
       let blurred = new cv.Mat();
       cv.GaussianBlur(gray, blurred, new cv.Size(7,7), 0);
+      
+      // Cannyエッジ検出（閾値 50, 150）
       let edges = new cv.Mat();
       cv.Canny(blurred, edges, 50, 150);
+      
+      // 膨張処理でエッジを強調
+      let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+      let dilated = new cv.Mat();
+      cv.dilate(edges, dilated, kernel);
+      
+      // 輪郭検出
       let contours = new cv.MatVector();
       let hierarchy = new cv.Mat();
-      cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+      cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
       
       let maxArea = 0;
       let bestContour = null;
@@ -208,6 +219,8 @@
       }
       hierarchy.delete();
       edges.delete();
+      dilated.delete();
+      kernel.delete();
       blurred.delete();
       gray.delete();
       
@@ -227,7 +240,7 @@
       }
       bestContour.delete();
       
-      // 簡易的に左上、右上、右下、左下に整列
+      // 整列（簡易的に左上、右上、右下、左下）
       detectedPoints.sort((a, b) => (a.x + a.y) - (b.x + b.y));
       let tl = detectedPoints[0];
       let br = detectedPoints[3];
@@ -249,6 +262,7 @@
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
       detectedPoints.forEach(pt => {
         pcCtx.beginPath();
+        // 検出された点は元画像座標なので、pcScaleで表示用に調整
         pcCtx.arc(pt.x * pcScale, pt.y * pcScale, 7, 0, 2 * Math.PI);
         pcCtx.fillStyle = "blue";
         pcCtx.fill();
@@ -268,7 +282,7 @@
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // ドラッグでポイントを調整するための処理
+    // ドラッグでポイント調整
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
@@ -300,7 +314,7 @@
       draggingPointIndex = -1;
     });
     
-    // ポイント確定ボタンで、現在の4点で最終的なパースペクティブ補正を実行
+    // ポイント確定で最終的なパースペクティブ補正を実行
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
@@ -406,7 +420,7 @@
       }
     }
     
-    // Pointer Events で FSモードのフィールド選択（タッチ・マウス対応）
+    // Pointer Events を使って FSモードのフィールド選択（タッチ・マウス対応）
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
@@ -509,7 +523,7 @@
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(fsImage, region.x, region.y, region.width, region.height, 0, 0, region.width, region.height);
         const croppedDataURL = tempCanvas.toDataURL();
-        // 2値化処理を実施
+        // 2値化処理
         binarizeImage(croppedDataURL).then(binarizedDataURL => {
           Tesseract.recognize(
             binarizedDataURL,
