@@ -7,7 +7,7 @@
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
-      overscroll-behavior: none; /* スクロール抑制 */
+      overscroll-behavior: none;
     }
     h1, h2, h3, p {
       margin-bottom: 10px;
@@ -124,8 +124,8 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    let pcScale = 1; // キャンバス表示用のスケール（画像はpcCanvasにスケール済みで描画）
-    let fsScale = 1; // FSキャンバス用のスケール
+    let pcScale = 1; // キャンバスに描画される画像のスケール
+    let fsScale = 1; // FSキャンバス用スケール
     let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
     const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
@@ -221,7 +221,7 @@
         return;
       }
       
-      // 検出された4点を取得（キャンバス座標系）
+      // 検出された4点を取得（キャンバス座標系：すでに表示されているpcCanvas上の座標）
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
         detectedPoints.push({
@@ -231,7 +231,7 @@
       }
       bestContour.delete();
       
-      // 座標の順序を堅牢にする（tl, tr, br, bl）
+      // 座標の順序付けを堅牢に
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
@@ -240,10 +240,8 @@
       srcMat.delete();
     }
     
-    // 4点を [tl, tr, br, bl] の順に整列する関数
+    // 4点を [tl, tr, br, bl] の順に整列する関数（元画像の座標に対応）
     function orderPoints(pts) {
-      // tl: min(x+y), br: max(x+y)
-      // tr: min(x-y), bl: max(x-y)
       let sumArr = pts.map(p => p.x + p.y);
       let diffArr = pts.map(p => p.x - p.y);
       let tl = pts[sumArr.indexOf(Math.min(...sumArr))];
@@ -309,13 +307,16 @@
       draggingPointIndex = -1;
     });
     
-    // ポイント確定で最終的なパースペクティブ補正を実行
+    // 【ポイント確定】ボタン：ユーザーが調整した4点を用いて最終的なパースペクティブ補正を行う
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      let [tl, tr, br, bl] = detectedPoints;
+      // ここで、キャンバス上の座標（検出された点）は pcScale が反映されているので、元画像の座標に変換する
+      let ptsOriginal = detectedPoints.map(pt => ({ x: pt.x / pcScale, y: pt.y / pcScale }));
+      ptsOriginal = orderPoints(ptsOriginal);
+      let [tl, tr, br, bl] = ptsOriginal;
       
       let widthA = Math.hypot(br.x - bl.x, br.y - bl.y);
       let widthB = Math.hypot(tr.x - tl.x, tr.y - tl.y);
@@ -324,6 +325,14 @@
       let heightA = Math.hypot(tr.x - br.x, tr.y - br.y);
       let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
       let maxHeight = Math.max(heightA, heightB);
+      
+      // 元画像をオフスクリーンキャンバスに描画して読み込む
+      let offCanvas = document.createElement('canvas');
+      offCanvas.width = pcImage.width;
+      offCanvas.height = pcImage.height;
+      let offCtx = offCanvas.getContext('2d');
+      offCtx.drawImage(pcImage, 0, 0, pcImage.width, pcImage.height);
+      let srcMat = cv.imread(offCanvas);
       
       let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
         tl.x, tl.y,
@@ -338,10 +347,9 @@
         0, maxHeight - 1
       ]);
       
-      let srcMat = cv.imread(pcCanvas);
-      let dstMat = new cv.Mat();
       let M = cv.getPerspectiveTransform(srcPts, dstPts);
       let dsize = new cv.Size(maxWidth, maxHeight);
+      let dstMat = new cv.Mat();
       cv.warpPerspective(srcMat, dstMat, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
       
       let tempCanvas = document.createElement('canvas');
@@ -414,7 +422,7 @@
       }
     }
     
-    // Pointer Events を使って FSモードのフィールド選択（タッチ・マウス対応）
+    // Pointer Events によるフィールド選択（タッチ・マウス対応）
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
