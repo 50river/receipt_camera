@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（自動切り出し＋回転・反転付き／ポイント調整＆各項目選択・OCR／2値化＋複数金額対応）</title>
+  <title>領収書OCRアプリ（自動切り出し＋回転・反転自動適用／ポイント調整＆各項目選択・OCR／2値化＋複数金額対応）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -38,9 +38,12 @@
       width: 300px;
       padding: 3px;
     }
+    /* ボタンとドロップダウンリスト（3倍サイズ） */
     button, select {
       margin-top: 10px;
       margin-right: 5px;
+      font-size: 3em;
+      padding: 0.3em 0.5em;
     }
     /* 調整中のポイント表示用 */
     .point {
@@ -72,9 +75,9 @@
   <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
   <br>
   <h3>補正結果</h3>
-  <!-- 表示サイズを半分に -->
+  <!-- 表示サイズを半分にする -->
   <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:50%;">
-  <!-- 回転・反転ボタン -->
+  <!-- 回転・反転ボタン（手動操作用：今回は自動適用するので表示は不要） -->
   <div id="transformControls" style="margin-top:10px; display:none;">
     <button id="rotate90Button">Rotate 90°</button>
     <button id="rotateNeg90Button">Rotate -90°</button>
@@ -126,20 +129,19 @@
     <input type="text" id="descriptionField" placeholder="OCR結果">
   </div>
   
-  <!-- ライブラリ読み込み -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.0/dist/tesseract.min.js"></script>
+  <!-- Tesseract.js 最新安定版 (2.1.5) を読み込む -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <!-- OpenCV.js の読み込み -->
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
+    // 以下、これまでのコードと同様の処理
     let pcScale = 1; // キャンバスに描画される画像のスケール
     let fsScale = 1; // FSキャンバス用のスケール
     let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
-    const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
+    const AREA_THRESHOLD = 10000;
     
-    /*==============================
-      ① 自動領収書切り出し＆補正モード
-    ==============================*/
     const pcCanvas = document.getElementById('pcCanvas');
     const pcCtx = pcCanvas.getContext('2d');
     let pcImage = new Image();
@@ -174,7 +176,6 @@
       transformControls.style.display = "none";
     };
     
-    // 自動切り出し＆候補4点検出（モルフォロジー処理付き）
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
@@ -230,7 +231,6 @@
         return;
       }
       
-      // 検出された4点を取得（キャンバス座標系）
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
         detectedPoints.push({
@@ -240,7 +240,6 @@
       }
       bestContour.delete();
       
-      // 座標の順序付けを堅牢に（tl, tr, br, bl）
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
@@ -249,7 +248,6 @@
       srcMat.delete();
     }
     
-    // 4点を [tl, tr, br, bl] の順に整列する関数
     function orderPoints(pts) {
       let sumArr = pts.map(p => p.x + p.y);
       let diffArr = pts.map(p => p.x - p.y);
@@ -284,7 +282,6 @@
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // ドラッグでポイント調整（キャンバス座標系そのまま使用）
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
@@ -316,13 +313,11 @@
       draggingPointIndex = -1;
     });
     
-    // ポイント確定ボタン：キャンバス上の座標から元画像座標に変換してパースペクティブ補正
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      // キャンバス上の座標はスケール済みなので、元画像の座標に戻す
       let ptsOriginal = detectedPoints.map(pt => ({ x: pt.x / pcScale, y: pt.y / pcScale }));
       ptsOriginal = orderPoints(ptsOriginal);
       let [tl, tr, br, bl] = ptsOriginal;
@@ -335,7 +330,6 @@
       let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
       let maxHeight = Math.max(heightA, heightB);
       
-      // オフスクリーンキャンバスに元画像（pcImage）の元解像度で描画
       let offCanvas = document.createElement('canvas');
       offCanvas.width = pcImage.width;
       offCanvas.height = pcImage.height;
@@ -367,23 +361,25 @@
       cv.imshow(tempCanvas, dstMat);
       let croppedDataURL = tempCanvas.toDataURL();
       
-      correctedImage.src = croppedDataURL;
-      fsImage.src = croppedDataURL;
+      // ここで、補正結果画像を自動的に90度回転＋水平反転させる
+      rotateImage(croppedDataURL, 90)
+        .then(rotatedDataURL => flipImage(rotatedDataURL))
+        .then(finalDataURL => {
+          correctedImage.src = finalDataURL;
+          fsImage.src = finalDataURL;
+          transformControls.style.display = "block";
+        });
       
       srcMat.delete(); dstMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
       
       detectedPoints = [];
       confirmPointsButton.style.display = "none";
-      transformControls.style.display = "block";
     });
     
-    /*==============================
-      ② 領収書各項目のフィールド選択＆OCRモード
-    ==============================*/
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
     const fsCtx = fsCanvas.getContext('2d');
-    let fsFieldRegions = {}; // 例: { date: {x,y,width,height}, amount: [{x,y,width,height}, ...], ... }
+    let fsFieldRegions = {};
     
     const fieldSelector = document.getElementById('fieldSelector');
     const fsResetButton = document.getElementById('fsResetButton');
@@ -432,7 +428,6 @@
       }
     }
     
-    // Pointer Events によるフィールド選択（タッチ・マウス対応）
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
@@ -529,7 +524,6 @@
     
     function performOCROnField(field, region) {
       return new Promise((resolve, reject) => {
-        // fsFieldRegionsはキャンバス上の座標なので、元画像(fsImage)の座標に変換する
         let originalX = region.x / fsScale;
         let originalY = region.y / fsScale;
         let originalWidth = region.width / fsScale;
@@ -541,7 +535,6 @@
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(fsImage, originalX, originalY, originalWidth, originalHeight, 0, 0, originalWidth, originalHeight);
         const croppedDataURL = tempCanvas.toDataURL();
-        // 2値化処理
         binarizeImage(croppedDataURL).then(binarizedDataURL => {
           Tesseract.recognize(
             binarizedDataURL,
@@ -566,7 +559,6 @@
       });
     }
     
-    // 画像の2値化処理（グレースケール＋閾値処理）
     function binarizeImage(dataURL) {
       return new Promise((resolve, reject) => {
         let img = new Image();
@@ -637,9 +629,6 @@
       return dateStr;
     }
     
-    /*==============================
-      追加機能：画像の回転・反転
-    ==============================*/
     const rotate90Button = document.getElementById('rotate90Button');
     const rotateNeg90Button = document.getElementById('rotateNeg90Button');
     const flipButton = document.getElementById('flipButton');
@@ -710,15 +699,11 @@
       });
     }
     
-    /*==============================
-      loadFsButton の処理：内部で画像を保存して再読み込み
-    ==============================*/
     loadFsButton.addEventListener('click', function() {
       if (!correctedImage.src) {
         alert("まず、補正を実行してください。");
         return;
       }
-      // データURLにタイムスタンプ付与してキャッシュ回避
       let storedDataURL = correctedImage.src + "?t=" + new Date().getTime();
       console.log("loadFsButton: storedDataURL =", storedDataURL);
       fsImage.onload = function() {
@@ -731,7 +716,7 @@
       fsImage.src = storedDataURL;
     });
     
-    // fsImage の再初期化は行わず、loadFsButton の処理内でのみ設定
+    // fsImage の再初期化は行わない
   </script>
 </body>
 </html>
