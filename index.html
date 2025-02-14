@@ -72,7 +72,7 @@
   <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
   <br>
   <h3>補正結果</h3>
-  <!-- 表示サイズを半分にする -->
+  <!-- 表示サイズを半分に -->
   <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:50%;">
   <!-- 回転・反転ボタン -->
   <div id="transformControls" style="margin-top:10px; display:none;">
@@ -131,8 +131,8 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    let pcScale = 1; // キャンバス表示用スケール
-    let fsScale = 1; // FSキャンバス用スケール
+    let pcScale = 1; // キャンバスに描画される画像のスケール
+    let fsScale = 1; // FSキャンバス用のスケール
     let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
     const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
@@ -240,7 +240,7 @@
       }
       bestContour.delete();
       
-      // 座標の順序付け（堅牢な方法）
+      // 座標の順序付けを堅牢に（tl, tr, br, bl）
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
@@ -718,19 +718,20 @@
         alert("まず、補正を実行してください。");
         return;
       }
-      // 内部で一度保存（データURL）し、キャッシュ回避のためタイムスタンプを付与
+      // データURLにタイムスタンプ付与してキャッシュ回避
       let storedDataURL = correctedImage.src + "?t=" + new Date().getTime();
-      fsImage = new Image();
+      console.log("loadFsButton: storedDataURL =", storedDataURL);
       fsImage.onload = function() {
         fsScale = (fsImage.width > (window.innerWidth - 40)) ? ((window.innerWidth - 40) / fsImage.width) : 1;
         fsCanvas.width = fsImage.width * fsScale;
         fsCanvas.height = fsImage.height * fsScale;
+        console.log("FS Canvas size:", fsCanvas.width, fsCanvas.height);
         drawFsCanvas();
       };
       fsImage.src = storedDataURL;
     });
     
-    // ※ fsImage の再初期化は不要（削除済み）
+    // fsImage の再初期化は行わず、loadFsButton の処理内でのみ設定
   </script>
 </body>
 </html>
