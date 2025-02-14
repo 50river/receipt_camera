@@ -42,12 +42,12 @@
       margin-top: 10px;
       margin-right: 5px;
     }
-    /* 調整中のポイント用スタイル */
+    /* 調整中のポイントのスタイル */
     .point {
       position: absolute;
       width: 12px;
       height: 12px;
-      background: red;
+      background: blue;
       border-radius: 50%;
       transform: translate(-50%, -50%);
       pointer-events: none;
@@ -126,8 +126,11 @@
   <script>
     let pcScale = 1; // pcCanvas用スケール
     let fsScale = 1; // fsCanvas用スケール
-    let detectedPoints = []; // 自動検出された4点
+    let detectedPoints = []; // 自動検出された4点（元画像座標）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
+    
+    // 調整用パラメータ（必要に応じて変更してください）
+    const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（画像サイズによっては下げる）
     
     /*==============================
       ① 自動領収書切り出し＆補正モード
@@ -158,15 +161,13 @@
       pcScale = (pcImage.width > maxDisplayWidth) ? (maxDisplayWidth / pcImage.width) : 1;
       pcCanvas.width = pcImage.width * pcScale;
       pcCanvas.height = pcImage.height * pcScale;
-      // 画像をキャンバスに描画
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
-      // 自動切り出し実行前は検出ポイントは空
       detectedPoints = [];
       confirmPointsButton.style.display = "none";
     };
     
-    // 自動切り出し＆補正（輪郭検出＋パースペクティブ変換前に4点を検出し表示）
+    // 自動切り出し＆候補4点検出
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
@@ -192,7 +193,8 @@
         cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
         if (approx.rows === 4) {
           let area = cv.contourArea(approx);
-          if (area > 10000 && area > maxArea) {
+          console.log("Contour " + i + " area:", area);
+          if (area > AREA_THRESHOLD && area > maxArea) {
             maxArea = area;
             if (bestContour !== null) bestContour.delete();
             bestContour = approx;
@@ -210,12 +212,12 @@
       gray.delete();
       
       if (bestContour === null) {
-        alert("領収書の輪郭が検出できませんでした。");
+        alert("領収書の輪郭が検出できませんでした。パラメータを調整してください。");
         srcMat.delete();
         return;
       }
       
-      // 検出された4点を取得
+      // 検出された4点を取得（元画像座標）
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
         detectedPoints.push({
@@ -235,15 +237,13 @@
       let tr = remaining[1];
       detectedPoints = [tl, tr, br, bl];
       
-      // 描画（自動検出されたポイントを表示）
+      console.log("検出された4点:", detectedPoints);
       drawPcCanvasWithPoints();
-      // 確定ボタンを表示
       confirmPointsButton.style.display = "inline-block";
       
       srcMat.delete();
     }
     
-    // 描画：画像と検出された4点を重ねて表示
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
@@ -253,7 +253,6 @@
         pcCtx.fillStyle = "blue";
         pcCtx.fill();
       });
-      // 線で連結
       if (detectedPoints.length === 4) {
         pcCtx.beginPath();
         pcCtx.moveTo(detectedPoints[0].x * pcScale, detectedPoints[0].y * pcScale);
@@ -267,18 +266,19 @@
       }
     }
     
-    // ポインターイベントで、検出されたポイントをドラッグで調整可能にする
+    autoCropButton.addEventListener('click', autoCrop);
+    
+    // ドラッグでポイントを調整するための処理
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
       const rect = pcCanvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) / pcScale;
       const y = (e.clientY - rect.top) / pcScale;
-      // 各点との距離が10px以内なら、その点を選択
+      draggingPointIndex = -1;
       for (let i = 0; i < 4; i++) {
         let pt = detectedPoints[i];
-        let d = Math.hypot(pt.x - x, pt.y - y);
-        if (d < 10) {
+        if (Math.hypot(pt.x - x, pt.y - y) < 10) {
           draggingPointIndex = i;
           break;
         }
@@ -300,13 +300,12 @@
       draggingPointIndex = -1;
     });
     
-    // 「ポイント確定」ボタンで、現在の4点でパースペクティブ補正を実行
+    // ポイント確定ボタンで、現在の4点で最終的なパースペクティブ補正を実行
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      // 変換に必要な点は元画像の座標なので、すでに検出された値はそのまま使用
       let tl = detectedPoints[0], tr = detectedPoints[1],
           br = detectedPoints[2], bl = detectedPoints[3];
       
@@ -348,7 +347,6 @@
       
       srcMat.delete(); dstMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
       
-      // 自動切り出し完了後、ポイント調整は終了
       detectedPoints = [];
       confirmPointsButton.style.display = "none";
     });
