@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <!-- レスポンシブ対応 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>領収書OCRアプリ</title>
   <style>
@@ -124,7 +125,7 @@
       <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
       <h3>補正結果</h3>
       <img id="correctedImage" alt="Corrected Image">
-      <!-- 回転・反転ボタン -->
+      <!-- 回転・反転ボタン（必要なら） -->
       <div id="transformControls" style="margin-top:10px; display:none;">
         <button id="rotate90Button">Rotate 90°</button>
         <button id="rotateNeg90Button">Rotate -90°</button>
@@ -180,7 +181,7 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    // 画面遷移用
+    // 画面遷移用関数
     function showScreen(screenId) {
       const screens = document.querySelectorAll('.screen');
       screens.forEach(screen => {
@@ -301,7 +302,16 @@
       gray.delete();
       
       if (bestContour === null) {
-        alert("領収書の輪郭が検出できませんでした。パラメータを調整してください。");
+        // 輪郭検出ができなかった場合は、デフォルトで画像全体の枠を設定
+        detectedPoints = [
+          { x: 0, y: 0 },
+          { x: pcCanvas.width, y: 0 },
+          { x: pcCanvas.width, y: pcCanvas.height },
+          { x: 0, y: pcCanvas.height }
+        ];
+        console.log("輪郭検出できなかったため、全体枠を設定");
+        drawPcCanvasWithPoints();
+        confirmPointsButton.style.display = "inline-block";
         srcMat.delete();
         return;
       }
@@ -336,7 +346,7 @@
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
-      // 5倍大きいポイント（半径35px）を描画
+      // ポイントの半径を35px（5倍）に、連結線も太く（lineWidth 10px）
       detectedPoints.forEach(pt => {
         pcCtx.beginPath();
         pcCtx.arc(pt.x, pt.y, 35, 0, 2 * Math.PI);
@@ -351,14 +361,14 @@
         }
         pcCtx.closePath();
         pcCtx.strokeStyle = "blue";
-        pcCtx.lineWidth = 10; // 5倍太いライン
+        pcCtx.lineWidth = 10;
         pcCtx.stroke();
       }
     }
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // 表示サイズと内部サイズの比率を使って座標を変換
+    // 座標変換：表示サイズと内部サイズの比率を使って正確な内部座標を求める
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
@@ -487,7 +497,7 @@
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
           fsFieldRegions[field].forEach(region => {
             fsCtx.strokeStyle = "red";
-            fsCtx.lineWidth = 10; // 太いライン
+            fsCtx.lineWidth = 10;
             fsCtx.strokeRect(region.x, region.y, region.width, region.height);
             fsCtx.fillStyle = "rgba(255,255,255,0.7)";
             fsCtx.fillRect(region.x, region.y - 20, 60, 20);
