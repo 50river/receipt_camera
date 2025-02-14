@@ -7,7 +7,7 @@
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
-      overscroll-behavior: none;
+      overscroll-behavior: none; /* スクロール抑制 */
     }
     h1, h2, h3, p {
       margin-bottom: 10px;
@@ -83,7 +83,7 @@
   <p>
     補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
     ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
-    OCR実行時、不要なスペース除去、和暦→西暦変換、金額は数字以外を除去して各領域の数値合計を算出します。
+    OCR実行時、不要なスペース除去、和暦→西暦変換、金額は数字以外を除去して各領域の数値の合計を算出します。
   </p>
   <label for="fieldSelector">対象項目:</label>
   <select id="fieldSelector">
@@ -124,8 +124,8 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    let pcScale = 1; // pcCanvas用スケール
-    let fsScale = 1; // fsCanvas用スケール
+    let pcScale = 1; // キャンバス表示用のスケール（画像はpcCanvasにスケール済みで描画）
+    let fsScale = 1; // FSキャンバス用のスケール
     let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
     const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
@@ -165,7 +165,7 @@
       confirmPointsButton.style.display = "none";
     };
     
-    // 自動切り出し＆候補4点検出（前処理にモルフォロジー処理を追加）
+    // 自動切り出し＆候補4点検出（モルフォロジー処理付き）
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
@@ -231,9 +231,8 @@
       }
       bestContour.delete();
       
-      // 順序付けをより堅牢にするために、sum と diff を利用
+      // 座標の順序を堅牢にする（tl, tr, br, bl）
       detectedPoints = orderPoints(detectedPoints);
-      
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
       confirmPointsButton.style.display = "inline-block";
@@ -259,15 +258,15 @@
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
       detectedPoints.forEach(pt => {
         pcCtx.beginPath();
-        pcCtx.arc(pt.x * pcScale, pt.y * pcScale, 7, 0, 2 * Math.PI);
+        pcCtx.arc(pt.x, pt.y, 7, 0, 2 * Math.PI);
         pcCtx.fillStyle = "blue";
         pcCtx.fill();
       });
       if (detectedPoints.length === 4) {
         pcCtx.beginPath();
-        pcCtx.moveTo(detectedPoints[0].x * pcScale, detectedPoints[0].y * pcScale);
+        pcCtx.moveTo(detectedPoints[0].x, detectedPoints[0].y);
         for (let i = 1; i < 4; i++) {
-          pcCtx.lineTo(detectedPoints[i].x * pcScale, detectedPoints[i].y * pcScale);
+          pcCtx.lineTo(detectedPoints[i].x, detectedPoints[i].y);
         }
         pcCtx.closePath();
         pcCtx.strokeStyle = "blue";
@@ -278,17 +277,17 @@
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // ドラッグでポイントを調整（キャンバス座標系）
+    // ドラッグでポイント調整（キャンバス座標系そのまま）
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
       const rect = pcCanvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left);
-      const y = (e.clientY - rect.top);
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
       draggingPointIndex = -1;
       for (let i = 0; i < 4; i++) {
         let pt = detectedPoints[i];
-        if (Math.hypot(pt.x * pcScale - x, pt.y * pcScale - y) < 10) {
+        if (Math.hypot(pt.x - x, pt.y - y) < 10) {
           draggingPointIndex = i;
           break;
         }
@@ -299,10 +298,9 @@
       if (draggingPointIndex === -1) return;
       e.preventDefault();
       const rect = pcCanvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left);
-      const y = (e.clientY - rect.top);
-      // 変換：キャンバス座標 → 元画像座標
-      detectedPoints[draggingPointIndex] = { x: x / pcScale, y: y / pcScale };
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      detectedPoints[draggingPointIndex] = { x, y };
       drawPcCanvasWithPoints();
     });
     
@@ -311,14 +309,13 @@
       draggingPointIndex = -1;
     });
     
-    // 確定ボタンで最終的なパースペクティブ補正を実行
+    // ポイント確定で最終的なパースペクティブ補正を実行
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      let tl = detectedPoints[0], tr = detectedPoints[1],
-          br = detectedPoints[2], bl = detectedPoints[3];
+      let [tl, tr, br, bl] = detectedPoints;
       
       let widthA = Math.hypot(br.x - bl.x, br.y - bl.y);
       let widthB = Math.hypot(tr.x - tl.x, tr.y - tl.y);
@@ -368,7 +365,7 @@
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
     const fsCtx = fsCanvas.getContext('2d');
-    let fsFieldRegions = {}; // 例: { date: {x,y,width,height}, amount: [ {x,y,width,height}, ... ], ... }
+    let fsFieldRegions = {}; // 例: { date: {x,y,width,height}, amount: [{x,y,width,height}, ...], ... }
     
     const fieldSelector = document.getElementById('fieldSelector');
     const fsResetButton = document.getElementById('fsResetButton');
