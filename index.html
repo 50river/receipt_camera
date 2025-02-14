@@ -24,6 +24,7 @@
       cursor: crosshair;
       max-width: 100%;
       height: auto;
+      touch-action: none; /* タッチ操作時のスクロールを抑制 */
     }
     /* ② フィールド選択モード用 */
     #fsCanvasContainer {
@@ -35,6 +36,7 @@
       cursor: crosshair;
       max-width: 100%;
       height: auto;
+      touch-action: none; /* タッチ操作時のスクロールを抑制 */
     }
     .field-group {
       margin-top: 15px;
@@ -318,7 +320,7 @@
       }
     }
     
-    // Pointer Events を使って FSモードのフィールド選択を統一（タッチ・マウス対応）
+    // Pointer Events を使って FSモードのフィールド選択（タッチ・マウス対応）
     fsCanvas.addEventListener('pointerdown', function(e) {
       if (!fieldSelector.value) {
         alert("まずは対象項目を選択してください。");
