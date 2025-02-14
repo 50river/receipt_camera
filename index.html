@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（2値化追加版）</title>
+  <title>領収書OCRアプリ（自動切り出し＋各項目選択・OCR／2値化＋複数金額対応）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -15,24 +15,12 @@
     hr {
       margin: 30px 0;
     }
-    /* ① パースペクティブ補正モード用 */
-    #pcCanvasContainer {
+    /* ① 自動切り出し・パースペクティブ補正モード用 */
+    #pcCanvasContainer, #fsCanvasContainer {
       position: relative;
       display: inline-block;
     }
-    #pcCanvas {
-      border: 1px solid #ccc;
-      cursor: crosshair;
-      max-width: 100%;
-      height: auto;
-      touch-action: none;
-    }
-    /* ② フィールド選択モード用 */
-    #fsCanvasContainer {
-      position: relative;
-      display: inline-block;
-    }
-    #fsCanvas {
+    #pcCanvas, #fsCanvas {
       border: 1px solid #ccc;
       cursor: crosshair;
       max-width: 100%;
@@ -59,19 +47,17 @@
 <body>
   <h1>領収書OCRアプリ</h1>
   
-  <!-- ① 画像パースペクティブ補正モード -->
-  <h2>1. 画像パースペクティブ補正</h2>
+  <!-- ① 自動切り出し＆パースペクティブ補正モード -->
+  <h2>1. 自動領収書切り出し＆補正</h2>
   <p>
-    ファイルを選択し、画像上で領収書の4隅（左上、右上、右下、左下）の順にクリックしてください。<br>
-    （クリックすると赤い円が表示され、順次線で連結されます。）
+    ファイルを選択すると、画像内の輪郭検出により領収書部分が自動で切り出され、正しい視点に補正されます。
   </p>
   <input type="file" id="imageInput" accept="image/*">
   <div id="pcCanvasContainer">
     <canvas id="pcCanvas"></canvas>
   </div>
   <br>
-  <button id="pcResetButton">ポイントリセット</button>
-  <button id="pcApplyButton">補正を実行</button>
+  <button id="autoCropButton">自動切り出し＆補正を実行</button>
   <br>
   <h3>補正結果</h3>
   <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:100%;">
@@ -85,7 +71,7 @@
   <p>
     補正済み画像を対象に、下記ドロップダウンから項目を選択し、画像上で読み取りたい領域をドラッグまたはタッチで指定してください。<br>
     ※日付、支払先、摘要は単一領域、金額は複数領域の指定が可能です。<br>
-    OCR実行時、不要なスペース除去、日付は和暦表記があれば西暦に変換、金額は数字以外を除去し、各領域の数値の合計を算出して表示します。
+    OCR実行時、不要なスペース除去、日付は和暦→西暦変換、金額は数字以外を除去し、各領域の数値の合計を算出します。
   </p>
   <label for="fieldSelector">対象項目:</label>
   <select id="fieldSelector">
@@ -126,21 +112,19 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
-    let pcScale = 1; // pcCanvas用のスケールファクター
-    let fsScale = 1; // fsCanvas用のスケールファクター
+    let pcScale = 1; // pcCanvas用スケール
+    let fsScale = 1; // fsCanvas用スケール
     
     /*==============================
-      ① 画像パースペクティブ補正モード
+      ① 自動領収書切り出し＆補正モード
     ==============================*/
-    let pcPoints = [];  // 4点（{x, y}）を格納
+    let pcPoints = []; // 手動で選ぶ場合の変数（未使用：自動切り出しを使う場合）
     const pcCanvas = document.getElementById('pcCanvas');
     const pcCtx = pcCanvas.getContext('2d');
-    const pcCanvasContainer = document.getElementById('pcCanvasContainer');
     let pcImage = new Image();
     
     const imageInput = document.getElementById('imageInput');
-    const pcResetButton = document.getElementById('pcResetButton');
-    const pcApplyButton = document.getElementById('pcApplyButton');
+    const autoCropButton = document.getElementById('autoCropButton');
     const correctedImage = document.getElementById('correctedImage');
     const loadFsButton = document.getElementById('loadFsButton');
     
@@ -157,98 +141,125 @@
     
     pcImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
-      if (pcImage.width > maxDisplayWidth) {
-        pcScale = maxDisplayWidth / pcImage.width;
-      } else {
-        pcScale = 1;
-      }
+      pcScale = (pcImage.width > maxDisplayWidth) ? (maxDisplayWidth / pcImage.width) : 1;
       pcCanvas.width = pcImage.width * pcScale;
       pcCanvas.height = pcImage.height * pcScale;
-      pcPoints = [];
-      drawPcCanvas();
-    };
-    
-    function drawPcCanvas() {
+      // 画像をキャンバスに描画（オプション）
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
-      pcPoints.forEach(pt => {
-        pcCtx.beginPath();
-        pcCtx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI);
-        pcCtx.fillStyle = "red";
-        pcCtx.fill();
-      });
-      if (pcPoints.length > 1) {
-        pcCtx.beginPath();
-        pcCtx.moveTo(pcPoints[0].x, pcPoints[0].y);
-        for (let i = 1; i < pcPoints.length; i++) {
-          pcCtx.lineTo(pcPoints[i].x, pcPoints[i].y);
-        }
-        pcCtx.strokeStyle = "red";
-        pcCtx.lineWidth = 2;
-        pcCtx.stroke();
-      }
-    }
+    };
     
-    pcCanvas.addEventListener('click', function(e) {
-      if (pcPoints.length >= 4) return;
-      const rect = pcCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      pcPoints.push({ x, y });
-      drawPcCanvas();
-    });
-    
-    pcResetButton.addEventListener('click', function() {
-      pcPoints = [];
-      drawPcCanvas();
-    });
-    
-    function onOpenCvReady() {
-      console.log("OpenCV.js is ready.");
-    }
-    
-    pcApplyButton.addEventListener('click', function() {
-      if (pcPoints.length < 4) {
-        alert("4つの角を選択してください。");
+    // 自動切り出し＆補正を実行する関数（輪郭検出＋パースペクティブ変換）
+    function autoCrop() {
+      if (!pcImage.src) {
+        alert("画像が読み込まれていません。");
         return;
       }
-      const widthTop = distance(pcPoints[0], pcPoints[1]);
-      const widthBottom = distance(pcPoints[3], pcPoints[2]);
-      const maxWidth = Math.max(widthTop, widthBottom);
-      const heightLeft = distance(pcPoints[0], pcPoints[3]);
-      const heightRight = distance(pcPoints[1], pcPoints[2]);
-      const maxHeight = Math.max(heightLeft, heightRight);
+      // pcCanvas の内容を元に処理（※元画像よりスケールされた状態であることに注意）
+      let srcMat = cv.imread(pcCanvas);
+      let gray = new cv.Mat();
+      cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY, 0);
+      let blurred = new cv.Mat();
+      cv.GaussianBlur(gray, blurred, new cv.Size(5,5), 0);
+      let edges = new cv.Mat();
+      cv.Canny(blurred, edges, 75, 200);
+      let contours = new cv.MatVector();
+      let hierarchy = new cv.Mat();
+      cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+      
+      let maxArea = 0;
+      let bestContour = null;
+      for (let i = 0; i < contours.size(); i++) {
+        let cnt = contours.get(i);
+        let peri = cv.arcLength(cnt, true);
+        let approx = new cv.Mat();
+        cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+        if (approx.rows === 4) {
+          let area = cv.contourArea(approx);
+          if (area > maxArea) {
+            maxArea = area;
+            if (bestContour !== null) bestContour.delete();
+            bestContour = approx;
+          } else {
+            approx.delete();
+          }
+        } else {
+          approx.delete();
+        }
+        cnt.delete();
+      }
+      hierarchy.delete();
+      edges.delete();
+      blurred.delete();
+      gray.delete();
+      
+      if (bestContour === null) {
+        alert("領収書の輪郭が検出できませんでした。");
+        srcMat.delete();
+        return;
+      }
+      
+      // bestContourから4点を抽出
+      let pts = [];
+      for (let i = 0; i < 4; i++) {
+        pts.push({
+          x: bestContour.intAt(i, 0),
+          y: bestContour.intAt(i, 1)
+        });
+      }
+      bestContour.delete();
+      
+      // 4点を左上、右上、右下、左下に整列する（簡易的な方法）
+      pts.sort((a, b) => (a.x + a.y) - (b.x + b.y));
+      let tl = pts[0];
+      let br = pts[3];
+      let remaining = [pts[1], pts[2]];
+      remaining.sort((a, b) => a.x - b.x);
+      let bl = remaining[0];
+      let tr = remaining[1];
+      
+      let widthA = Math.hypot(br.x - bl.x, br.y - bl.y);
+      let widthB = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+      let maxWidth = Math.max(widthA, widthB);
+      
+      let heightA = Math.hypot(tr.x - br.x, tr.y - br.y);
+      let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
+      let maxHeight = Math.max(heightA, heightB);
       
       let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        pcPoints[0].x, pcPoints[0].y,
-        pcPoints[1].x, pcPoints[1].y,
-        pcPoints[2].x, pcPoints[2].y,
-        pcPoints[3].x, pcPoints[3].y
+        tl.x, tl.y,
+        tr.x, tr.y,
+        br.x, br.y,
+        bl.x, bl.y
       ]);
       let dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
         0, 0,
-        maxWidth, 0,
-        maxWidth, maxHeight,
-        0, maxHeight
+        maxWidth - 1, 0,
+        maxWidth - 1, maxHeight - 1,
+        0, maxHeight - 1
       ]);
       
-      let srcMat = cv.imread(pcCanvas);
-      let dstMat = new cv.Mat();
       let M = cv.getPerspectiveTransform(srcPts, dstPts);
       let dsize = new cv.Size(maxWidth, maxHeight);
+      let dstMat = new cv.Mat();
       cv.warpPerspective(srcMat, dstMat, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
       
       let tempCanvas = document.createElement('canvas');
       tempCanvas.width = maxWidth;
       tempCanvas.height = maxHeight;
       cv.imshow(tempCanvas, dstMat);
-      correctedImage.src = tempCanvas.toDataURL();
+      let autoCroppedDataURL = tempCanvas.toDataURL();
+      
+      // 結果の画像を表示＆FSモード用画像にセット
+      correctedImage.src = autoCroppedDataURL;
+      fsImage.src = autoCroppedDataURL;
       
       srcMat.delete(); dstMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
-      
-      fsImage.src = correctedImage.src;
-    });
+    }
     
+    autoCropButton.addEventListener('click', autoCrop);
+    
+    // 2点間の距離計算ユーティリティ
     function distance(p1, p2) {
       return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
     }
@@ -267,7 +278,6 @@
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
     const fsCtx = fsCanvas.getContext('2d');
-    const fsCanvasContainer = document.getElementById('fsCanvasContainer');
     let fsFieldRegions = {};  // 例: { date: {x,y,width,height}, amount: [ {x,y,width,height}, ... ], ... }
     
     const fieldSelector = document.getElementById('fieldSelector');
@@ -281,11 +291,7 @@
     
     fsImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
-      if (fsImage.width > maxDisplayWidth) {
-        fsScale = maxDisplayWidth / fsImage.width;
-      } else {
-        fsScale = 1;
-      }
+      fsScale = (fsImage.width > maxDisplayWidth) ? (maxDisplayWidth / fsImage.width) : 1;
       fsCanvas.width = fsImage.width * fsScale;
       fsCanvas.height = fsImage.height * fsScale;
       fsFieldRegions = {};
@@ -449,7 +455,7 @@
       });
     }
     
-    // 新規追加：画像の2値化処理（グレースケール変換＋閾値処理）
+    // 画像の2値化処理（グレースケール＋閾値処理）
     function binarizeImage(dataURL) {
       return new Promise((resolve, reject) => {
         let img = new Image();
@@ -463,7 +469,6 @@
           let gray = new cv.Mat();
           cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
           let binary = new cv.Mat();
-          // 閾値 128 で2値化（必要に応じて調整）
           cv.threshold(gray, binary, 128, 255, cv.THRESH_BINARY);
           cv.imshow(canvas, binary);
           let resultDataURL = canvas.toDataURL();
