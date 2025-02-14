@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（自動切り出し＋ポイント調整＆各項目選択・OCR／2値化＋複数金額対応）</title>
+  <title>領収書OCRアプリ（自動切り出し＋回転・反転機能付き／ポイント調整＆各項目選択・OCR／2値化＋複数金額対応）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -73,6 +73,12 @@
   <br>
   <h3>補正結果</h3>
   <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:100%;">
+  <!-- 新規：回転／反転用ボタン -->
+  <div id="transformControls" style="margin-top:10px; display:none;">
+    <button id="rotate90Button">Rotate 90°</button>
+    <button id="rotateNeg90Button">Rotate -90°</button>
+    <button id="flipButton">Flip Horizontally</button>
+  </div>
   <br>
   <button id="loadFsButton">この画像でフィールド選択を開始</button>
   
@@ -125,7 +131,7 @@
   
   <script>
     let pcScale = 1; // キャンバスに描画される画像のスケール
-    let fsScale = 1; // FSキャンバス用スケール
+    let fsScale = 1; // FSキャンバス用のスケール
     let detectedPoints = []; // 自動検出された4点（キャンバス座標系）
     let draggingPointIndex = -1; // ドラッグ中の点のインデックス
     const AREA_THRESHOLD = 10000;  // 輪郭面積の閾値（必要に応じて調整）
@@ -142,6 +148,7 @@
     const confirmPointsButton = document.getElementById('confirmPointsButton');
     const correctedImage = document.getElementById('correctedImage');
     const loadFsButton = document.getElementById('loadFsButton');
+    const transformControls = document.getElementById('transformControls');
     
     imageInput.addEventListener('change', function(e) {
       if (e.target.files.length > 0) {
@@ -163,6 +170,7 @@
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
       detectedPoints = [];
       confirmPointsButton.style.display = "none";
+      transformControls.style.display = "none";
     };
     
     // 自動切り出し＆候補4点検出（モルフォロジー処理付き）
@@ -221,7 +229,7 @@
         return;
       }
       
-      // 検出された4点を取得（キャンバス座標系：すでに表示されているpcCanvas上の座標）
+      // 検出された4点を取得（キャンバス座標系）
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
         detectedPoints.push({
@@ -231,7 +239,7 @@
       }
       bestContour.delete();
       
-      // 座標の順序付けを堅牢に
+      // 座標の順序付け（堅牢な方法）
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
@@ -240,7 +248,7 @@
       srcMat.delete();
     }
     
-    // 4点を [tl, tr, br, bl] の順に整列する関数（元画像の座標に対応）
+    // 4点を [tl, tr, br, bl] の順に整列する関数
     function orderPoints(pts) {
       let sumArr = pts.map(p => p.x + p.y);
       let diffArr = pts.map(p => p.x - p.y);
@@ -307,13 +315,13 @@
       draggingPointIndex = -1;
     });
     
-    // 【ポイント確定】ボタン：ユーザーが調整した4点を用いて最終的なパースペクティブ補正を行う
+    // ポイント確定ボタン：ユーザー調整後の4点をもとに、元画像座標に変換してパースペクティブ補正
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
         return;
       }
-      // ここで、キャンバス上の座標（検出された点）は pcScale が反映されているので、元画像の座標に変換する
+      // キャンバス上の座標はスケール済みなので、元画像座標に戻す
       let ptsOriginal = detectedPoints.map(pt => ({ x: pt.x / pcScale, y: pt.y / pcScale }));
       ptsOriginal = orderPoints(ptsOriginal);
       let [tl, tr, br, bl] = ptsOriginal;
@@ -326,12 +334,12 @@
       let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
       let maxHeight = Math.max(heightA, heightB);
       
-      // 元画像をオフスクリーンキャンバスに描画して読み込む
+      // オフスクリーンキャンバスに元画像を描画
       let offCanvas = document.createElement('canvas');
       offCanvas.width = pcImage.width;
       offCanvas.height = pcImage.height;
       let offCtx = offCanvas.getContext('2d');
-      offCtx.drawImage(pcImage, 0, 0, pcImage.width, pcImage.height);
+      offCtx.drawImage(pcImage, 0, 0);
       let srcMat = cv.imread(offCanvas);
       
       let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
@@ -365,6 +373,8 @@
       
       detectedPoints = [];
       confirmPointsButton.style.display = "none";
+      // 回転・反転ボタンも表示
+      transformControls.style.display = "block";
     });
     
     /*==============================
@@ -422,7 +432,7 @@
       }
     }
     
-    // Pointer Events によるフィールド選択（タッチ・マウス対応）
+    // Pointer Events で FSモードのフィールド選択（タッチ・マウス対応）
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
@@ -620,6 +630,87 @@
       }
       return dateStr;
     }
+    
+    /*==============================
+      追加機能：画像の回転・反転
+    ==============================*/
+    
+    // 回転ボタンのイベントリスナーを設定
+    const rotate90Button = document.getElementById('rotate90Button');
+    const rotateNeg90Button = document.getElementById('rotateNeg90Button');
+    const flipButton = document.getElementById('flipButton');
+    
+    rotate90Button.addEventListener('click', function() {
+      rotateImage(correctedImage.src, 90).then(newDataURL => {
+        correctedImage.src = newDataURL;
+        fsImage.src = newDataURL;
+      });
+    });
+    
+    rotateNeg90Button.addEventListener('click', function() {
+      rotateImage(correctedImage.src, -90).then(newDataURL => {
+        correctedImage.src = newDataURL;
+        fsImage.src = newDataURL;
+      });
+    });
+    
+    flipButton.addEventListener('click', function() {
+      flipImage(correctedImage.src).then(newDataURL => {
+        correctedImage.src = newDataURL;
+        fsImage.src = newDataURL;
+      });
+    });
+    
+    // 90度回転関数
+    function rotateImage(dataURL, angle) {
+      return new Promise((resolve, reject) => {
+        let img = new Image();
+        img.onload = function() {
+          let canvas = document.createElement('canvas');
+          let ctx = canvas.getContext('2d');
+          // 90度回転の場合、幅と高さを入れ替える
+          if (angle % 180 !== 0) {
+            canvas.width = img.height;
+            canvas.height = img.width;
+          } else {
+            canvas.width = img.width;
+            canvas.height = img.height;
+          }
+          ctx.save();
+          // 中心に原点を移動
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.rotate(angle * Math.PI / 180);
+          ctx.drawImage(img, -img.width / 2, -img.height / 2);
+          ctx.restore();
+          resolve(canvas.toDataURL());
+        };
+        img.onerror = reject;
+        img.src = dataURL;
+      });
+    }
+    
+    // 水平反転関数
+    function flipImage(dataURL) {
+      return new Promise((resolve, reject) => {
+        let img = new Image();
+        img.onload = function() {
+          let canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          let ctx = canvas.getContext('2d');
+          ctx.save();
+          ctx.translate(img.width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(img, 0, 0);
+          ctx.restore();
+          resolve(canvas.toDataURL());
+        };
+        img.onerror = reject;
+        img.src = dataURL;
+      });
+    }
+    
+    // ※ transformControls（回転・反転ボタン）のHTMLは、補正結果画像下に表示されるように追加してください。
   </script>
 </body>
 </html>
