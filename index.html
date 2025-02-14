@@ -302,14 +302,16 @@
       gray.delete();
       
       if (bestContour === null) {
-        // 輪郭検出ができなかった場合は、デフォルトで画像全体の枠を設定
+        // 輪郭検出に失敗した場合は、キャンバス全体ではなく、左右上下に10%の余白を持たせた枠をデフォルトで設定
+        const marginX = pcCanvas.width * 0.1;
+        const marginY = pcCanvas.height * 0.1;
         detectedPoints = [
-          { x: 0, y: 0 },
-          { x: pcCanvas.width, y: 0 },
-          { x: pcCanvas.width, y: pcCanvas.height },
-          { x: 0, y: pcCanvas.height }
+          { x: marginX, y: marginY },
+          { x: pcCanvas.width - marginX, y: marginY },
+          { x: pcCanvas.width - marginX, y: pcCanvas.height - marginY },
+          { x: marginX, y: pcCanvas.height - marginY }
         ];
-        console.log("輪郭検出できなかったため、全体枠を設定");
+        console.log("輪郭検出できなかったため、余白付きのデフォルト枠を設定");
         drawPcCanvasWithPoints();
         confirmPointsButton.style.display = "inline-block";
         srcMat.delete();
@@ -346,10 +348,10 @@
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
-      // ポイントの半径を35px（5倍）に、連結線も太く（lineWidth 10px）
+      // 編集用のポイント（半径15px）を描画
       detectedPoints.forEach(pt => {
         pcCtx.beginPath();
-        pcCtx.arc(pt.x, pt.y, 35, 0, 2 * Math.PI);
+        pcCtx.arc(pt.x, pt.y, 15, 0, 2 * Math.PI);
         pcCtx.fillStyle = "blue";
         pcCtx.fill();
       });
@@ -361,14 +363,14 @@
         }
         pcCtx.closePath();
         pcCtx.strokeStyle = "blue";
-        pcCtx.lineWidth = 10;
+        pcCtx.lineWidth = 4; // 太さ4px
         pcCtx.stroke();
       }
     }
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // 座標変換：表示サイズと内部サイズの比率を使って正確な内部座標を求める
+    // 座標変換：表示サイズと内部サイズの比率を使って正確な内部座標を計算
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
@@ -380,7 +382,7 @@
       draggingPointIndex = -1;
       for (let i = 0; i < 4; i++) {
         let pt = detectedPoints[i];
-        if (Math.hypot(pt.x - x, pt.y - y) < 35) { // 35pxで検出
+        if (Math.hypot(pt.x - x, pt.y - y) < 15) { // 検出半径15px
           draggingPointIndex = i;
           break;
         }
@@ -452,7 +454,7 @@
       cv.imshow(tempCanvas, dstMat);
       let croppedDataURL = tempCanvas.toDataURL();
       
-      // 自動で90°回転＋水平反転を適用
+      // 自動で90°回転＋水平反転を適用して最終画像とする
       rotateImage(croppedDataURL, 90)
         .then(rotatedDataURL => flipImage(rotatedDataURL))
         .then(finalDataURL => {
@@ -497,7 +499,7 @@
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
           fsFieldRegions[field].forEach(region => {
             fsCtx.strokeStyle = "red";
-            fsCtx.lineWidth = 10;
+            fsCtx.lineWidth = 4;  // 細くする
             fsCtx.strokeRect(region.x, region.y, region.width, region.height);
             fsCtx.fillStyle = "rgba(255,255,255,0.7)";
             fsCtx.fillRect(region.x, region.y - 20, 60, 20);
@@ -508,7 +510,7 @@
         } else {
           const r = fsFieldRegions[field];
           fsCtx.strokeStyle = "red";
-          fsCtx.lineWidth = 10;
+          fsCtx.lineWidth = 4;
           fsCtx.strokeRect(r.x, r.y, r.width, r.height);
           fsCtx.fillStyle = "rgba(255,255,255,0.7)";
           fsCtx.fillRect(r.x, r.y - 20, 50, 20);
@@ -546,7 +548,7 @@
       fsCurrentY = (e.clientY - rect.top) * scaleY;
       drawFsCanvas();
       fsCtx.strokeStyle = "blue";
-      fsCtx.lineWidth = 10;
+      fsCtx.lineWidth = 4;
       fsCtx.strokeRect(fsStartX, fsStartY, fsCurrentX - fsStartX, fsCurrentY - fsStartY);
     });
     
