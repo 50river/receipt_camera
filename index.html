@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>領収書OCRアプリ（自動切り出し＋回転・反転付き／ポイント調整＆各項目選択・OCR／2値化＋複数金額対応）</title>
+  <title>領収書OCRアプリ（自動切り出し＋回転・反転自動適用／ポイント調整＆各項目選択・OCR／2値化＋複数金額対応）</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -38,7 +38,7 @@
       width: 300px;
       padding: 3px;
     }
-    /* ボタンとドロップダウンリストのサイズを3倍程度に調整 */
+    /* ボタンとドロップダウンリスト（3倍サイズ） */
     button, select {
       margin-top: 10px;
       margin-right: 5px;
@@ -77,7 +77,7 @@
   <h3>補正結果</h3>
   <!-- 表示サイズを半分にする -->
   <img id="correctedImage" alt="Corrected Image" style="border:1px solid #ccc; max-width:50%;">
-  <!-- 回転・反転ボタン -->
+  <!-- 回転・反転ボタン（手動操作用：今回は自動適用するので表示は不要） -->
   <div id="transformControls" style="margin-top:10px; display:none;">
     <button id="rotate90Button">Rotate 90°</button>
     <button id="rotateNeg90Button">Rotate -90°</button>
@@ -338,7 +338,7 @@
       let heightB = Math.hypot(tl.x - bl.x, tl.y - bl.y);
       let maxHeight = Math.max(heightA, heightB);
       
-      // 元画像をオフスクリーンキャンバスに描画（元の解像度）
+      // オフスクリーンキャンバスに元画像（pcImage）の元解像度で描画
       let offCanvas = document.createElement('canvas');
       offCanvas.width = pcImage.width;
       offCanvas.height = pcImage.height;
@@ -370,14 +370,20 @@
       cv.imshow(tempCanvas, dstMat);
       let croppedDataURL = tempCanvas.toDataURL();
       
-      correctedImage.src = croppedDataURL;
-      fsImage.src = croppedDataURL;
+      // 自動で90度回転＋水平反転を実施
+      rotateImage(croppedDataURL, 90)
+        .then(rotatedDataURL => flipImage(rotatedDataURL))
+        .then(finalDataURL => {
+          correctedImage.src = finalDataURL;
+          fsImage.src = finalDataURL;
+          // FSモード用画像更新後、変換ボタンは不要なら非表示
+          transformControls.style.display = "block";
+        });
       
       srcMat.delete(); dstMat.delete(); srcPts.delete(); dstPts.delete(); M.delete();
       
       detectedPoints = [];
       confirmPointsButton.style.display = "none";
-      transformControls.style.display = "block";
     });
     
     /*==============================
@@ -734,7 +740,7 @@
       fsImage.src = storedDataURL;
     });
     
-    // fsImage の再初期化はここでは行わない
+    // fsImage の再初期化は行わない
   </script>
 </body>
 </html>
