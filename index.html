@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <!-- レスポンシブ対応 -->
+  <!-- レスポンシブ対応のためのviewport設定 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>領収書OCRアプリ</title>
   <style>
@@ -46,7 +46,7 @@
       position: relative;
       margin: 0 auto;
     }
-    /* 内部サイズは属性で設定、表示はCSSで100%に */
+    /* キャンバスは内部サイズを設定し、表示はCSSで横幅100%に */
     #pcCanvas, #fsCanvas {
       border: 1px solid #ccc;
       cursor: crosshair;
@@ -55,7 +55,7 @@
       height: auto;
       touch-action: none;
     }
-    /* ボタンとドロップダウンリスト */
+    /* ボタンとドロップダウン */
     button, select {
       margin: 10px 5px;
       font-size: 1.5em;
@@ -80,17 +80,17 @@
       width: calc(100% - 90px);
       padding: 3px;
     }
-    /* 編集用の枠（ポイント） */
+    /* 編集用の枠（ポイント）の初期サイズ：ここではポイントは15pxの半径、ライン太さは4px */
     .point {
       position: absolute;
-      width: 12px;
+      width: 12px;  /* この値は後でcanvas上で直接描画するので、drawPcCanvasWithPoints()内で変更します */
       height: 12px;
       background: blue;
       border-radius: 50%;
       transform: translate(-50%, -50%);
       pointer-events: none;
     }
-    /* メディアクエリ例 */
+    /* メディアクエリ例（画面幅600px未満の場合） */
     @media (max-width: 600px) {
       #header {
         padding: 8px;
@@ -181,6 +181,35 @@
   <script async src="https://docs.opencv.org/3.4.0/opencv.js" onload="onOpenCvReady();"></script>
   
   <script>
+    /***********************************************************************
+     * 変数一覧と用途:
+     * 
+     * pcScale           : PCキャンバス上で表示される画像のスケール（内部サイズ/表示サイズ）
+     * fsScale           : FSキャンバス上で表示される画像のスケール
+     * detectedPoints    : PCキャンバス上で検出（またはデフォルト）された4点（クロッピング用）
+     * draggingPointIndex: ドラッグ中のポイントのインデックス（ドラッグしていなければ -1）
+     * AREA_THRESHOLD    : 輪郭検出時に使用する面積の閾値
+     * 
+     * pcCanvas, pcCtx   : PCキャンバス要素とその2Dコンテキスト（自動切り出し＆補正用）
+     * pcImage           : アップロードされたオリジナル画像
+     * imageInput        : 画像ファイル選択用の input 要素
+     * autoCropButton    : 自動切り出し＆補正を実行するボタン
+     * confirmPointsButton: ユーザーが編集したクロッピング用の4点を確定するボタン
+     * correctedImage    : 補正後の画像を表示する img 要素
+     * loadFsButton      : 補正後画像をFSモードに読み込むボタン
+     * transformControls : 画像の回転・反転操作用ボタンを含むコンテナ
+     * 
+     * fsCanvas, fsCtx   : FSキャンバス要素とその2Dコンテキスト（フィールド選択用）
+     * fsImage           : 補正後画像をFSモードで利用するためのImageオブジェクト
+     * fsFieldRegions    : フィールド選択でユーザーが選択した領域（各フィールド名をキーとする）
+     * fieldSelector     : OCR対象フィールド（日付、金額、支払先、摘要）を選択するドロップダウン
+     * fsResetButton     : FSモードでフィールド選択をリセットするボタン
+     * fsOcrButton       : 選択した領域でOCRを実行するボタン
+     * ocrOutput         : OCR結果を表示するpre要素
+     * dateField, amountField, payeeField, descriptionField:
+     *                   各フィールドのOCR結果を表示するテキスト入力欄
+     ***********************************************************************/
+    
     // 画面遷移用関数
     function showScreen(screenId) {
       const screens = document.querySelectorAll('.screen');
@@ -191,6 +220,7 @@
           screen.classList.remove('active');
         }
       });
+      // 画面遷移後にキャンバスの再描画
       if(screenId === 'screen1') {
         drawPcCanvasWithPoints();
       }
@@ -199,6 +229,7 @@
       }
     }
     
+    // 画面遷移ボタン
     document.getElementById('nextToScreen2').addEventListener('click', function() {
       if (!correctedImage.src) {
         alert("補正結果画像がありません。");
@@ -211,12 +242,11 @@
       showScreen('screen1');
     });
     
-    // グローバル変数
-    let pcScale = 1;
-    let fsScale = 1;
-    let detectedPoints = [];
-    let draggingPointIndex = -1;
-    const AREA_THRESHOLD = 10000;
+    // -------------------- PC（切り出し＆補正）モード --------------------
+    let pcScale = 1;      // 元画像からキャンバスへの表示スケール
+    let detectedPoints = [];  // 自動検出またはデフォルトの4点
+    let draggingPointIndex = -1; // ドラッグ中のポイントインデックス（なければ -1）
+    const AREA_THRESHOLD = 10000;  // 輪郭検出に使用する面積閾値
     
     const pcCanvas = document.getElementById('pcCanvas');
     const pcCtx = pcCanvas.getContext('2d');
@@ -229,6 +259,7 @@
     const loadFsButton = document.getElementById('loadFsButton');
     const transformControls = document.getElementById('transformControls');
     
+    // 画像ファイル選択時：画像を読み込む
     imageInput.addEventListener('change', function(e) {
       if (e.target.files.length > 0) {
         const file = e.target.files[0];
@@ -240,9 +271,11 @@
       }
     });
     
+    // pcImage読み込み後：キャンバスに画像を描画
     pcImage.onload = function() {
       let maxDisplayWidth = window.innerWidth - 40;
       pcScale = (pcImage.width > maxDisplayWidth) ? (maxDisplayWidth / pcImage.width) : 1;
+      // キャンバス内部サイズは元画像サイズにスケールを掛けたもの
       pcCanvas.width = pcImage.width * pcScale;
       pcCanvas.height = pcImage.height * pcScale;
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
@@ -252,6 +285,7 @@
       transformControls.style.display = "none";
     };
     
+    // 自動輪郭検出（autoCrop関数）
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
@@ -301,8 +335,8 @@
       blurred.delete();
       gray.delete();
       
+      // 輪郭検出が失敗した場合：キャンバスの左右上下10%の余白を持つ枠を設定
       if (bestContour === null) {
-        // 輪郭検出に失敗した場合は、キャンバス全体ではなく、左右上下に10%の余白を持たせた枠をデフォルトで設定
         const marginX = pcCanvas.width * 0.1;
         const marginY = pcCanvas.height * 0.1;
         detectedPoints = [
@@ -318,6 +352,7 @@
         return;
       }
       
+      // 検出された輪郭の4点を取得
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
         detectedPoints.push({
@@ -327,6 +362,7 @@
       }
       bestContour.delete();
       
+      // 4点を [tl, tr, br, bl] の順に並び替え
       detectedPoints = orderPoints(detectedPoints);
       console.log("検出された4点（整列後）:", detectedPoints);
       drawPcCanvasWithPoints();
@@ -335,6 +371,7 @@
       srcMat.delete();
     }
     
+    // 4点を正しい順序に並び替える関数（[tl, tr, br, bl]の順）
     function orderPoints(pts) {
       let sumArr = pts.map(p => p.x + p.y);
       let diffArr = pts.map(p => p.x - p.y);
@@ -345,10 +382,11 @@
       return [tl, tr, br, bl];
     }
     
+    // PCキャンバスに画像と編集用のポイント・ラインを描画する関数
+    // ポイントの半径を15px、連結線の太さを4pxに設定
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
-      // 編集用のポイント（半径15px）を描画
       detectedPoints.forEach(pt => {
         pcCtx.beginPath();
         pcCtx.arc(pt.x, pt.y, 15, 0, 2 * Math.PI);
@@ -363,14 +401,14 @@
         }
         pcCtx.closePath();
         pcCtx.strokeStyle = "blue";
-        pcCtx.lineWidth = 4; // 太さ4px
+        pcCtx.lineWidth = 4;
         pcCtx.stroke();
       }
     }
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    // 座標変換：表示サイズと内部サイズの比率を使って正確な内部座標を計算
+    // PCキャンバスの pointer イベント：表示サイズと内部サイズの比率を使って正確な内部座標に変換
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
@@ -380,9 +418,10 @@
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       draggingPointIndex = -1;
+      // ポイント検出の許容誤差は15pxに設定
       for (let i = 0; i < 4; i++) {
         let pt = detectedPoints[i];
-        if (Math.hypot(pt.x - x, pt.y - y) < 15) { // 検出半径15px
+        if (Math.hypot(pt.x - x, pt.y - y) < 15) {
           draggingPointIndex = i;
           break;
         }
@@ -406,6 +445,7 @@
       draggingPointIndex = -1;
     });
     
+    // ポイント確定ボタン：ユーザーが調整した4点をもとにパースペクティブ変換を実施
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
@@ -454,7 +494,7 @@
       cv.imshow(tempCanvas, dstMat);
       let croppedDataURL = tempCanvas.toDataURL();
       
-      // 自動で90°回転＋水平反転を適用して最終画像とする
+      // 補正後の画像を自動で90°回転＋水平反転して最終画像とする
       rotateImage(croppedDataURL, 90)
         .then(rotatedDataURL => flipImage(rotatedDataURL))
         .then(finalDataURL => {
@@ -469,10 +509,11 @@
       confirmPointsButton.style.display = "none";
     });
     
+    // -------------------- FS（フィールド選択＆OCR）モード --------------------
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
     const fsCtx = fsCanvas.getContext('2d');
-    let fsFieldRegions = {};
+    let fsFieldRegions = {};  // 各フィールド名をキーとした、領域情報オブジェクト
     
     const fieldSelector = document.getElementById('fieldSelector');
     const fsResetButton = document.getElementById('fsResetButton');
@@ -495,11 +536,12 @@
     function drawFsCanvas() {
       fsCtx.clearRect(0, 0, fsCanvas.width, fsCanvas.height);
       fsCtx.drawImage(fsImage, 0, 0, fsCanvas.width, fsCanvas.height);
+      // フィールド選択枠の描画（ライン太さ4px）
       for (const field in fsFieldRegions) {
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
           fsFieldRegions[field].forEach(region => {
             fsCtx.strokeStyle = "red";
-            fsCtx.lineWidth = 4;  // 細くする
+            fsCtx.lineWidth = 4;
             fsCtx.strokeRect(region.x, region.y, region.width, region.height);
             fsCtx.fillStyle = "rgba(255,255,255,0.7)";
             fsCtx.fillRect(region.x, region.y - 20, 60, 20);
@@ -521,6 +563,7 @@
       }
     }
     
+    // FSキャンバスの描画：ユーザーがドラッグして選択した領域の座標を正しく取得
     let fsIsDrawing = false;
     let fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
@@ -621,8 +664,10 @@
       });
     });
     
+    // FSモード：指定領域でOCRを実行する関数
     function performOCROnField(field, region) {
       return new Promise((resolve, reject) => {
+        // FSキャンバス上の領域座標を元画像の座標に変換
         let originalX = region.x / fsScale;
         let originalY = region.y / fsScale;
         let originalWidth = region.width / fsScale;
@@ -634,6 +679,7 @@
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(fsImage, originalX, originalY, originalWidth, originalHeight, 0, 0, originalWidth, originalHeight);
         const croppedDataURL = tempCanvas.toDataURL();
+        // 2値化処理でOCR精度向上
         binarizeImage(croppedDataURL).then(binarizedDataURL => {
           Tesseract.recognize(
             binarizedDataURL,
@@ -658,6 +704,7 @@
       });
     }
     
+    // 画像を2値化してOCR精度向上のための画像に変換
     function binarizeImage(dataURL) {
       return new Promise((resolve, reject) => {
         let img = new Image();
@@ -684,6 +731,7 @@
       });
     }
     
+    // 丸囲み数字を通常の数字に置換する関数
     function replaceCircledNumbers(text) {
       const mapping = {
         '⓪': '0', '①': '1', '②': '2', '③': '3', '④': '4',
@@ -695,6 +743,7 @@
       });
     }
     
+    // 日付フィールド用の後処理（和暦を西暦に変換など）
     function processDateField(text) {
       if (text.includes("令和") || text.includes("平成") || text.includes("昭和")) {
         return convertJapaneseEra(text);
@@ -702,10 +751,12 @@
       return text;
     }
     
+    // 金額フィールド用の後処理（数字以外を除去）
     function processAmountField(text) {
       return text.replace(/\D/g, "");
     }
     
+    // 和暦を西暦に変換する関数
     function convertJapaneseEra(dateStr) {
       let match = dateStr.match(/(令和|平成|昭和)(元|\d+)[年](\d{1,2})[月](\d{1,2})[日]/);
       if (match) {
@@ -728,6 +779,7 @@
       return dateStr;
     }
     
+    // 回転・反転操作用
     const rotate90Button = document.getElementById('rotate90Button');
     const rotateNeg90Button = document.getElementById('rotateNeg90Button');
     const flipButton = document.getElementById('flipButton');
@@ -753,6 +805,7 @@
       });
     });
     
+    // 画像を指定角度回転する関数（dataURLを受け取り、回転後のdataURLを返す）
     function rotateImage(dataURL, angle) {
       return new Promise((resolve, reject) => {
         let img = new Image();
@@ -778,6 +831,7 @@
       });
     }
     
+    // 画像を水平反転する関数
     function flipImage(dataURL) {
       return new Promise((resolve, reject) => {
         let img = new Image();
@@ -798,6 +852,7 @@
       });
     }
     
+    // loadFsButton：補正済み画像をFSモードへ内部保存・再読み込み
     loadFsButton.addEventListener('click', function() {
       if (!correctedImage.src) {
         alert("まず、補正を実行してください。");
@@ -814,7 +869,7 @@
       };
       fsImage.src = storedDataURL;
     });
-    // fsImage の再初期化は行わない
+    // fsImageの再初期化は行わない
   </script>
 </body>
 </html>
