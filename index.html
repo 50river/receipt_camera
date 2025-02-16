@@ -19,7 +19,7 @@
       min-height: 100vh;
       box-shadow: 0 0 10px rgba(0,0,0,0.1);
     }
-    /* ヘッダー部分 */
+    /* ヘッダー */
     #header {
       background: #007aff;
       color: #fff;
@@ -40,7 +40,7 @@
     hr {
       margin: 20px 0;
     }
-    /* キャンバスを含むコンテナ */
+    /* キャンバスコンテナ */
     #pcCanvasContainer, #fsCanvasContainer {
       position: relative;
       margin: 0 auto;
@@ -54,20 +54,20 @@
       height: auto;
       touch-action: none;
     }
-    /* ボタン、ドロップダウンのスタイル */
+    /* ボタン・ドロップダウン */
     button, select {
       margin: 10px 5px;
       font-size: 1.5em;
       padding: 0.15em 0.25em;
     }
-    /* 補正結果画像のスタイル */
+    /* 補正済み画像 */
     #correctedImage {
       border: 1px solid #ccc;
       max-width: 50%;
       display: block;
       margin: 10px auto;
     }
-    /* 入力フィールドグループのスタイル */
+    /* 入力フィールド */
     .field-group {
       margin-top: 10px;
     }
@@ -79,7 +79,7 @@
       width: calc(100% - 90px);
       padding: 3px;
     }
-    /* OCR進捗表示領域（画面上部に配置） */
+    /* OCR進捗表示（画面上部） */
     #ocrOutput {
       white-space: pre-wrap;
       font-family: sans-serif;
@@ -88,13 +88,12 @@
       background: #f9f9f9;
       margin-bottom: 10px;
     }
-    /* OCRグループ化パラメータ設定領域 */
+    /* OCRグループ化パラメータ設定 */
     #ocrThresholdControls {
       margin-top: 10px;
       padding: 10px;
       border: 1px solid #ccc;
     }
-    /* レスポンシブ対応 */
     @media (max-width: 600px) {
       #header { padding: 8px; font-size: 1.2em; }
       button, select { font-size: 1.2em; padding: 0.1em 0.2em; }
@@ -113,16 +112,13 @@
     <div id="screen1" class="screen active">
       <h2>画像切り出し＆補正</h2>
       <p>画像ファイルを選択し、クロッピング用の編集枠を調整してください。</p>
-      <!-- 画像ファイル選択 -->
       <input type="file" id="imageInput" accept="image/*">
-      <!-- 画像表示用キャンバス -->
       <div id="pcCanvasContainer">
         <canvas id="pcCanvas"></canvas>
       </div>
       <button id="autoCropButton">自動切り出し＆補正を実行</button>
       <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
       <h3>補正結果</h3>
-      <!-- 補正済み画像表示 -->
       <img id="correctedImage" alt="Corrected Image">
       <div id="transformControls" style="display:none; margin-top:10px;">
         <button id="rotate90Button">Rotate 90°</button>
@@ -130,7 +126,6 @@
         <button id="flipButton">Flip Horizontally</button>
       </div>
       <br>
-      <!-- 次のスクリーンへ -->
       <button id="nextToScreen2">次へ</button>
     </div>
     
@@ -138,15 +133,15 @@
     <div id="screen2" class="screen">
       <h2>フィールド選択＆OCR</h2>
       
-      <!-- OCR進捗表示（画面上部に表示） -->
+      <!-- OCR進捗表示（画面上部固定） -->
       <div id="ocrOutput"></div>
       
-      <!-- キャンバス表示（OCR済み画像） -->
+      <!-- OCR済み画像キャンバス -->
       <div id="fsCanvasContainer">
         <canvas id="fsCanvas"></canvas>
       </div>
       
-      <!-- 入力フォーム（キャンバスの直下に配置） -->
+      <!-- 入力フォーム（キャンバス直下に配置） -->
       <div class="field-group">
         <label for="dateField">日付:</label>
         <input type="text" id="dateField" placeholder="OCR結果">
@@ -164,7 +159,7 @@
         <input type="text" id="descriptionField" placeholder="OCR結果">
       </div>
       
-      <!-- 以下、その他のコントロール -->
+      <!-- その他のコントロール -->
       <label for="fieldSelector">対象項目:</label>
       <select id="fieldSelector">
         <option value="">--フィールドを選択--</option>
@@ -195,53 +190,45 @@
     </div>
   </div>
   
-  <!-- ライブラリ読み込み（Tesseract.jsとOpenCV.js） -->
+  <!-- ライブラリ読み込み -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
   <script async src="https://docs.opencv.org/3.4.0/opencv.js"></script>
   
   <script>
     /*************************************
      * グローバル変数
-     *
-     * lastGroupBoxes: OCR実行後に得られるグループの赤枠の座標情報を保持
-     * lastOcrData: 全体OCRの結果データ
-     * groupOcrResults: 各グループのOCR結果を保存するオブジェクト
-     * selectedGroupIndex: キャンバス上でユーザーが選択したグループのインデックス
-     * currentInput: 現在フォーカスされている入力フォーム（OCR結果を貼り付ける対象）
      *************************************/
-    let lastGroupBoxes = [];
-    let lastOcrData = null;
-    let groupOcrResults = {};
-    let selectedGroupIndex = null;
-    let currentInput = null;
+    let lastGroupBoxes = [];  // 全体OCR結果から算出されたグループの赤枠情報（フィールドリセットまで保持）
+    let lastOcrData = null;   // 全体OCRの結果データ
+    let groupOcrResults = {}; // 各グループのOCR結果（キー：グループ番号）
+    let selectedGroupIndex = null; // キャンバス上で選択されたグループのインデックス
+    let currentInput = null;  // 現在フォーカスされている入力フォーム
     
     /*************************************
      * 入力フォームのフォーカス処理
-     * 新しいフォームにフォーカスすると前のグループ選択をリセットする
+     * 新しい入力フォームにフォーカスすると前回のグループ選択はクリアする
      *************************************/
     ["dateField", "amountField", "payeeField", "descriptionField"].forEach(id => {
       const input = document.getElementById(id);
       input.addEventListener("focus", function() {
         currentInput = this;
-        // 新しい入力フォームを選択したときは、前のグループ選択をクリア
         selectedGroupIndex = null;
       });
     });
     
     /*************************************
-     * pasteOcrResultIntoInput
-     * 現在選択されているグループのOCR結果を、現在の入力フォームに貼り付ける。
-     * 貼り付け後、currentInputをリセットして次回の貼り付け対象をクリアする。
+     * OCR結果を入力フォームに貼り付ける関数
+     * 貼り付け後、次回の貼り付け対象をクリアするため currentInput をリセット
      *************************************/
     function pasteOcrResultIntoInput() {
-      if(currentInput && selectedGroupIndex !== null) {
-        if(groupOcrResults.hasOwnProperty(selectedGroupIndex)) {
+      if (currentInput && selectedGroupIndex !== null) {
+        if (groupOcrResults.hasOwnProperty(selectedGroupIndex)) {
           currentInput.value = groupOcrResults[selectedGroupIndex];
           currentInput.focus();
           currentInput = null;
         } else {
           performOCROnField("selected", lastGroupBoxes[selectedGroupIndex]).then(resultText => {
-            if(currentInput.id === "dateField"){
+            if (currentInput.id === "dateField") {
               resultText = processDateField(resultText);
             }
             groupOcrResults[selectedGroupIndex] = resultText;
@@ -254,23 +241,20 @@
     }
     
     /*************************************
-     * 画面遷移処理 showScreen
-     * 画面遷移時に、スクロール位置を常に先頭に戻す。
-     * スクリーン2へ遷移時は、自動で全体OCRを開始する。
+     * 画面遷移処理
+     * 画面遷移時に常にページ先頭にスクロールし、スクリーン２では全体OCRを自動開始
      *************************************/
     function showScreen(screenId) {
       document.querySelectorAll('.screen').forEach(screen => {
         screen.classList.toggle('active', screen.id === screenId);
       });
-      // 画面上部にスクロールする
       window.scrollTo(0, 0);
-      if(screenId === 'screen1') {
+      if (screenId === 'screen1') {
         drawPcCanvasWithPoints();
       }
-      if(screenId === 'screen2') {
+      if (screenId === 'screen2') {
         drawFsCanvas();
-        // スクリーン2に遷移したときに自動で全体OCRを開始
-        ocrWholeButton.click();
+        ocrWholeButton.click(); // スクリーン２遷移時に自動で全体OCRを開始
       }
     }
     
@@ -287,18 +271,17 @@
     });
     
     /*************************************
-     * PCモード（画像切り出し＆補正）
+     * PCモード：画像切り出し＆補正処理
      *************************************/
     let pcScale = 1;
     let detectedPoints = [];
     let draggingPointIndex = -1;
     const AREA_THRESHOLD = 10000;
-    
     const pcCanvas = document.getElementById('pcCanvas');
     const pcCtx = pcCanvas.getContext('2d');
     let pcImage = new Image();
     
-    // 画像ファイル選択時に画像を読み込み、pcCanvasに描画する
+    // 画像ファイル選択後、画像を読み込みpcCanvasに描画する
     const imageInput = document.getElementById('imageInput');
     const autoCropButton = document.getElementById('autoCropButton');
     const confirmPointsButton = document.getElementById('confirmPointsButton');
@@ -325,10 +308,7 @@
       transformControls.style.display = "none";
     };
     
-    /*************************************
-     * autoCrop
-     * 画像から自動で4点を検出し、切り出しを実行する
-     *************************************/
+    // 自動切り出し処理（画像から4点を検出してpcCanvasに描画）
     function autoCrop() {
       if (!pcImage.src) {
         alert("画像が読み込まれていません。");
@@ -344,7 +324,6 @@
       const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
       const dilated = new cv.Mat();
       cv.dilate(edges, dilated, kernel);
-      
       const contours = new cv.MatVector();
       const hierarchy = new cv.Mat();
       cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
@@ -372,8 +351,8 @@
       hierarchy.delete(); edges.delete(); dilated.delete(); kernel.delete();
       blurred.delete(); gray.delete();
       
-      // もし輪郭が検出できなければ、画像の端にデフォルトの枠を設定
       if (bestContour === null) {
+        // 輪郭が見つからない場合はデフォルトの枠を設定
         const marginX = pcCanvas.width * 0.1;
         const marginY = pcCanvas.height * 0.1;
         detectedPoints = [
@@ -388,7 +367,6 @@
         return;
       }
       
-      // 検出された4点を保存
       detectedPoints = [];
       for (let i = 0; i < 4; i++) {
         detectedPoints.push({ x: bestContour.intAt(i, 0), y: bestContour.intAt(i, 1) });
@@ -400,10 +378,7 @@
       srcMat.delete();
     }
     
-    /*************************************
-     * orderPoints
-     * 4点の座標を整列させ、左上、右上、右下、左下の順に並べ替える
-     *************************************/
+    // 4点の順番を整列（左上、右上、右下、左下）
     function orderPoints(pts) {
       const sumArr = pts.map(p => p.x + p.y);
       const diffArr = pts.map(p => p.x - p.y);
@@ -414,10 +389,7 @@
       return [tl, tr, br, bl];
     }
     
-    /*************************************
-     * drawPcCanvasWithPoints
-     * PC用キャンバスに画像と検出された4点、及びその線を描画する
-     *************************************/
+    // PCキャンバスに画像と検出された4点、及びそれらを結ぶ線を描画
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
       pcCtx.drawImage(pcImage, 0, 0, pcCanvas.width, pcCanvas.height);
@@ -442,9 +414,7 @@
     
     autoCropButton.addEventListener('click', autoCrop);
     
-    /*************************************
-     * PCキャンバス上での4点操作（ドラッグで移動できる）
-     *************************************/
+    // PCキャンバス上の4点をドラッグ操作で移動できるようにする
     pcCanvas.addEventListener('pointerdown', function(e) {
       if (detectedPoints.length !== 4) return;
       e.preventDefault();
@@ -476,10 +446,7 @@
     
     pcCanvas.addEventListener('pointerup', e => { e.preventDefault(); draggingPointIndex = -1; });
     
-    /*************************************
-     * confirmPointsButton
-     * 検出または調整した4点を元に、元画像から透視変換による切り出しを行う
-     *************************************/
+    // confirmPointsButton: 調整後の4点を元に透視変換し、補正画像を生成する
     confirmPointsButton.addEventListener('click', function() {
       if (detectedPoints.length !== 4) {
         alert("4点が設定されていません。");
@@ -527,7 +494,7 @@
       cv.imshow(tempCanvas, dstMat);
       const croppedDataURL = tempCanvas.toDataURL();
       
-      // 画像の回転・反転処理
+      // 回転・反転処理を実行
       rotateImage(croppedDataURL, 90)
         .then(rotatedDataURL => flipImage(rotatedDataURL))
         .then(finalDataURL => {
@@ -542,7 +509,7 @@
     });
     
     /*************************************
-     * FSモード（フィールド選択＆OCR）
+     * FSモード：フィールド選択＆OCR処理
      *************************************/
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
@@ -550,17 +517,16 @@
     let fsScale = 1;
     let fsFieldRegions = {};
     
-    // 各種コントロール取得
+    // 入力フォーム・各種コントロールの取得
     const fieldSelector = document.getElementById('fieldSelector');
     const fsResetButton = document.getElementById('fsResetButton');
     const fsOcrButton = document.getElementById('fsOcrButton');
     const ocrWholeButton = document.getElementById('ocrWholeButton');
-    // 入力フォーム
+    const ocrOutput = document.getElementById('ocrOutput');
     const dateField = document.getElementById('dateField');
     const amountField = document.getElementById('amountField');
     const payeeField = document.getElementById('payeeField');
     const descriptionField = document.getElementById('descriptionField');
-    const ocrOutput = document.getElementById('ocrOutput');
     
     fsImage.onload = function() {
       const maxDisplayWidth = window.innerWidth - 40;
@@ -571,14 +537,11 @@
       drawFsCanvas();
     };
     
-    /*************************************
-     * drawFsCanvas
-     * FS用キャンバスに画像、ユーザー指定のフィールド枠、グループ枠（赤）、および選択グループ（オレンジ）を描画する
-     *************************************/
+    // drawFsCanvas: FS用キャンバスに画像、ユーザー指定フィールド枠、赤枠グループ、選択グループ（オレンジ）を描画
     function drawFsCanvas() {
       fsCtx.clearRect(0, 0, fsCanvas.width, fsCanvas.height);
       fsCtx.drawImage(fsImage, 0, 0, fsCanvas.width, fsCanvas.height);
-      // ユーザー指定のフィールド枠（赤）はフィールドリセットボタンが押されるまでそのまま描画
+      // ユーザー指定フィールド枠（赤）を描画
       for (const field in fsFieldRegions) {
         if (field === "amount" && Array.isArray(fsFieldRegions[field])) {
           fsFieldRegions[field].forEach(region => {
@@ -603,12 +566,12 @@
           fsCtx.fillText(field, r.x + 2, r.y - 5);
         }
       }
-      // 常に保持する赤枠のグループ情報（lastGroupBoxes）を描画
-      if(lastGroupBoxes.length > 0) {
+      // 赤枠グループ情報（lastGroupBoxes）は常に保持して描画
+      if (lastGroupBoxes.length > 0) {
         drawGroupedBoxes(lastGroupBoxes);
       }
-      // 選択中のグループがあればオレンジの枠でハイライト
-      if(selectedGroupIndex !== null && lastGroupBoxes[selectedGroupIndex]){
+      // 選択グループがあればオレンジでハイライト
+      if (selectedGroupIndex !== null && lastGroupBoxes[selectedGroupIndex]) {
         let box = lastGroupBoxes[selectedGroupIndex];
         fsCtx.strokeStyle = "orange";
         fsCtx.lineWidth = 4;
@@ -616,15 +579,12 @@
       }
     }
     
-    /*************************************
-     * fsFieldRegions:
-     * ユーザーが指定したフィールド枠の情報を保持する
-     *************************************/
+    // フィールド枠（ユーザー指定領域）のドラッグ描画処理
     let fsIsDrawing = false, fsStartX, fsStartY, fsCurrentX, fsCurrentY;
     
     fsCanvas.addEventListener('pointerdown', function(e) {
-      // 入力フォームがフォーカス中なら、グループ選択処理を行う
-      if(currentInput) return;
+      // 入力フォームがフォーカス中ならグループ選択処理を行う
+      if (currentInput) return;
       if (!fieldSelector.value) {
         alert("まずは対象項目を選択してください。");
         return;
@@ -647,7 +607,6 @@
       fsCurrentX = (e.clientX - rect.left) * scaleX;
       fsCurrentY = (e.clientY - rect.top) * scaleY;
       drawFsCanvas();
-      // 青枠でドラッグ中の矩形を描画
       fsCtx.strokeStyle = "blue";
       fsCtx.lineWidth = 4;
       fsCtx.strokeRect(fsStartX, fsStartY, fsCurrentX - fsStartX, fsCurrentY - fsStartY);
@@ -678,8 +637,8 @@
     });
     
     /*************************************
-     * fsResetButton
-     * フィールドリセット時、ユーザー指定フィールド枠、グループ選択、OCR結果、赤枠情報をクリアする
+     * fsResetButton: リセット処理
+     * ユーザー指定フィールド、グループ選択、OCR結果、赤枠情報を全てクリア
      *************************************/
     fsResetButton.addEventListener('click', function() {
       fsFieldRegions = {};
@@ -690,8 +649,7 @@
     });
     
     /*************************************
-     * fsOcrButton
-     * ユーザー指定のフィールド領域でOCR処理を行う
+     * fsOcrButton: ユーザー指定フィールド領域に対してOCRを実行する
      *************************************/
     fsOcrButton.addEventListener('click', function() {
       ocrOutput.textContent = "各領域のOCR処理中…\n";
@@ -731,9 +689,8 @@
     });
     
     /*************************************
-     * ocrWholeButton
-     * 全体OCR処理を実行し、その結果からグループ化を行い赤枠情報を保存する
-     * スクリーン２遷移時に自動で実行される
+     * ocrWholeButton: 全体OCRを実行し、グループ化して赤枠情報を算出・保存する
+     * スクリーン２遷移時に自動実行される
      *************************************/
     ocrWholeButton.addEventListener('click', async function() {
       ocrOutput.textContent = "全体OCR実行中...\n";
@@ -750,7 +707,7 @@
         const { data } = await worker.recognize(fsImage.src);
         lastOcrData = data;
         ocrOutput.textContent += "全体OCR完了。\n";
-        // グループ化のみを実施（マージ処理は行わず、赤枠情報を保持）
+        // グループ化して赤枠情報を算出・保存する
         displayGroupedText(data);
       } catch (err) {
         console.error("全体OCRエラー:", err);
@@ -761,15 +718,16 @@
     });
     
     /*************************************
-     * 傾き補正＋グループ分け＋横分割用関数群
+     * OCRグループ化関連関数
      *************************************/
-    // completeBBox: 各単語のバウンディングボックスの端点が存在しない場合に補完する
+    
+    // completeBBox: バウンディングボックスが不完全な場合に補完する
     function completeBBox(bbox) {
       if (bbox.tl && bbox.tr && bbox.br && bbox.bl) return bbox;
       return { tl: { x: bbox.x0, y: bbox.y0 }, tr: { x: bbox.x1, y: bbox.y0 }, br: { x: bbox.x1, y: bbox.y1 }, bl: { x: bbox.x0, y: bbox.y1 } };
     }
     
-    // computeAverageTilt: 単語ごとに左側の線の傾きを計算し、平均傾きを返す
+    // computeAverageTilt: 単語ごとの左側の傾きの平均を計算する
     function computeAverageTilt(words) {
       let sum = 0, count = 0;
       words.forEach(word => {
@@ -781,13 +739,13 @@
       return count > 0 ? sum / count : 0;
     }
     
-    // rotatePoint: 指定した角度で点の回転を行う
+    // rotatePoint: 点を指定角度で回転させる
     function rotatePoint(point, angle) {
       let cos = Math.cos(angle), sin = Math.sin(angle);
       return { x: point.x * cos - point.y * sin, y: point.x * sin + point.y * cos };
     }
     
-    // augmentWordsWithRotatedLeftY: 各単語の左側の中心座標と幅を、画像の傾きを補正した上で計算する
+    // augmentWordsWithRotatedLeftY: 単語ごとの左側の中心座標と幅を、回転補正して計算する
     function augmentWordsWithRotatedLeftY(words, avgAngle) {
       return words.map(word => {
         let bbox = completeBBox(word.bbox);
@@ -802,7 +760,7 @@
       });
     }
     
-    // groupWordsByLineTilt: 単語を縦方向の中心座標でグループ化する
+    // groupWordsByLineTilt: 単語を縦方向（左側の中心座標）でグループ化する
     function groupWordsByLineTilt(words) {
       let sorted = words.slice().sort((a, b) => a.rotatedLeftYMid - b.rotatedLeftYMid);
       let groups = [], currentGroup = [];
@@ -819,7 +777,7 @@
       return groups;
     }
     
-    // groupWordsHorizontally: 各行内の単語を横方向の位置でグループ化する
+    // groupWordsHorizontally: 各行内の単語を横方向でグループ化する
     function groupWordsHorizontally(words) {
       let sorted = words.slice().sort((a, b) => a.rotatedLeftX - b.rotatedLeftX);
       let totalWidth = sorted.reduce((sum, w) => sum + w.rotatedWidth, 0);
@@ -840,7 +798,7 @@
       return groups;
     }
     
-    // displayGroupedText: 全体OCR結果から単語をグループ化し、各グループの赤枠座標情報を算出・保存する
+    // displayGroupedText: 全体OCR結果から単語をグループ化し、各グループのバウンディングボックス（赤枠）を算出・保存・描画する
     function displayGroupedText(data) {
       drawFsCanvas();
       let avgAngle = computeAverageTilt(data.words);
@@ -852,7 +810,7 @@
         horizontalGroups.forEach(subgroup => finalGroups.push(subgroup));
       });
       let groupedText = "\n【グループ化されたOCR結果】\n";
-      // 算出された各グループのバウンディングボックスを計算する
+      // 各グループのバウンディングボックスを計算する
       let boxes = finalGroups.map((group, index) => {
         groupedText += `Group ${index + 1}: ${group.map(w => w.text).join(" ")}\n`;
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -871,12 +829,12 @@
       });
       ocrOutput.textContent += groupedText;
       console.log(groupedText);
-      // 保存：算出した赤枠情報をlastGroupBoxesに保存する（フィールドリセットまで保持）
+      // 保存：赤枠情報をlastGroupBoxesに保持
       lastGroupBoxes = boxes;
       drawGroupedBoxes(boxes);
     }
     
-    // updateGroupedBoxes: 再OCR結果などをもとに、赤枠情報を更新して描画する
+    // updateGroupedBoxes: スライダー変更などにより、赤枠情報を更新する
     function updateGroupedBoxes() {
       if (!lastOcrData) return;
       drawFsCanvas();
@@ -907,10 +865,10 @@
       drawGroupedBoxes(boxes);
     }
     
-    // drawGroupedBoxes: 赤枠として各グループのバウンディングボックスを描画する
+    // drawGroupedBoxes: 赤枠（グループ枠）を描画する
     function drawGroupedBoxes(boxes) {
       boxes.forEach((box, index) => {
-        fsCtx.strokeStyle = "red"; // 赤枠で描画
+        fsCtx.strokeStyle = "red";
         fsCtx.lineWidth = 3;
         fsCtx.strokeRect(box.x, box.y, box.width, box.height);
         fsCtx.fillStyle = "red";
@@ -960,7 +918,7 @@
     }
     
     /*************************************
-     * binarizeImage: 画像を二値化し、OCRに適した状態に変換する
+     * binarizeImage: 画像を二値化してOCRに適した状態に変換する
      *************************************/
     function binarizeImage(dataURL) {
       return new Promise((resolve, reject) => {
@@ -999,7 +957,7 @@
     }
     
     /*************************************
-     * processDateField: 日付フィールド用に和暦を西暦に変換する
+     * processDateField: 日付フィールド用に和暦→西暦変換を実施
      *************************************/
     function processDateField(text) {
       if (text.includes("令和") || text.includes("平成") || text.includes("昭和")) {
@@ -1009,7 +967,7 @@
     }
     
     /*************************************
-     * processAmountField: 金額フィールドから数字以外を削除する
+     * processAmountField: 金額フィールドから数字以外を削除
      *************************************/
     function processAmountField(text) {
       return text.replace(/\D/g, "");
@@ -1063,13 +1021,13 @@
       });
     });
     
+    // rotateImage: 指定角度で画像を回転
     function rotateImage(dataURL, angle) {
       return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = function() {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          // キャンバスサイズは回転角度によって入れ替える
           if (angle % 180 !== 0) {
             canvas.width = img.height;
             canvas.height = img.width;
@@ -1089,6 +1047,7 @@
       });
     }
     
+    // flipImage: 画像を左右反転する
     function flipImage(dataURL) {
       return new Promise((resolve, reject) => {
         const img = new Image();
@@ -1110,7 +1069,7 @@
     }
     
     /*************************************
-     * スライダー処理
+     * スライダー処理：OCRグループ化パラメータ更新
      *************************************/
     const groupThresholdSlider = document.getElementById("groupThresholdSlider");
     const groupThresholdValue = document.getElementById("groupThresholdValue");
@@ -1127,12 +1086,10 @@
     });
     
     /*************************************
-     * キャンバス上でグループ枠をクリックして選択する処理
-     * クリックした位置に合致するグループがあれば、そのインデックスをselectedGroupIndexにセット
-     * その後、入力フォームがフォーカスされていれば自動でOCR結果を貼り付ける
+     * FSキャンバス上のグループ選択処理
+     * クリックした位置に合致するグループがあれば、そのインデックスをselectedGroupIndexにセットし、入力フォームに貼り付け
      *************************************/
     fsCanvas.addEventListener("click", function(e) {
-      // キャンバス上のクリック座標を計算
       const rect = fsCanvas.getBoundingClientRect();
       const scaleX = fsCanvas.width / rect.width;
       const scaleY = fsCanvas.height / rect.height;
@@ -1140,20 +1097,19 @@
       const clickY = (e.clientY - rect.top) * scaleY;
       console.log("Canvas click:", clickX, clickY);
       let foundIndex = null;
-      for(let i = 0; i < lastGroupBoxes.length; i++){
+      for (let i = 0; i < lastGroupBoxes.length; i++) {
         let box = lastGroupBoxes[i];
-        if(clickX >= box.x && clickX <= box.x + box.width &&
-           clickY >= box.y && clickY <= box.y + box.height){
+        if (clickX >= box.x && clickX <= box.x + box.width &&
+            clickY >= box.y && clickY <= box.y + box.height) {
           foundIndex = i;
           break;
         }
       }
-      if(foundIndex !== null){
+      if (foundIndex !== null) {
         console.log("Selected group index:", foundIndex);
         selectedGroupIndex = foundIndex;
-        drawFsCanvas(); // 赤枠は常に描画、選択枠はオレンジでハイライト
-        // もしすでに入力フォームがフォーカスされていれば自動で貼り付け
-        if(currentInput){
+        drawFsCanvas(); // 赤枠は常に描画、選択グループはオレンジでハイライト
+        if (currentInput) {
           pasteOcrResultIntoInput();
         }
       } else {
