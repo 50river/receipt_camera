@@ -30,8 +30,30 @@
     /* 計算式・合計表示エリア */
     .field-label { font-weight: bold; }
     .normal-text { font-weight: normal; }
-    /* OCR進捗メーター */
-    #ocrProgress { width: 100%; height: 20px; }
+    /* カスタムプログレスバー */
+    #ocrProgressContainer {
+      position: relative;
+      width: 100%;
+      height: 20px;
+      background: #ddd;
+      margin-bottom: 10px;
+    }
+    #ocrProgressTop {
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      width: 0;
+      background: #4caf50;
+    }
+    #ocrProgressBottom {
+      position: absolute;
+      right: 0;
+      top: 0;
+      height: 100%;
+      width: 0;
+      background: #2196f3;
+    }
     /* 指示文（FSキャンバス直下） */
     .instruction { margin: 10px 0; font-size: 0.9em; color: #555; }
     /* ダイアログ（計算用：金額項目用） */
@@ -64,7 +86,6 @@
     <div id="screen1" class="screen active">
       <h2>画像切り出し＆補正</h2>
       <p>画像ファイルを選択し、クロッピング用の編集枠を調整してください。</p>
-      <!-- ファイル選択：capture属性を削除 -->
       <input type="file" id="imageInput" accept="image/*">
       <div id="pcCanvasContainer"><canvas id="pcCanvas"></canvas></div>
       <button id="autoCropButton">自動切り出し＆補正を実行</button>
@@ -83,18 +104,21 @@
     <!-- スクリーン２：フィールド選択＆OCR -->
     <div id="screen2" class="screen">
       <h2>フィールド選択＆OCR</h2>
-      <!-- OCR進捗メーター -->
-      <progress id="ocrProgress" value="0" max="1"></progress>
+      <!-- カスタムプログレスバー -->
+      <div id="ocrProgressContainer">
+        <div id="ocrProgressTop"></div>
+        <div id="ocrProgressBottom"></div>
+      </div>
       <div id="fsCanvasContainer"><canvas id="fsCanvas"></canvas></div>
       
-      <!-- 指示文（FSキャンバス直下） -->
+      <!-- 指示文 -->
       <div class="instruction">
         入力フォームが選択されている状態で、領収書画像上の選択したい赤枠をタッチすると、選択した枠の画像とOCR結果が表示されます。<br>
         金額項目の場合は「＋」「－」を押すと、次に入力するものを足すか引くかを指定でき、「＝」ボタンを押すと最終合計がフォームに反映されます。<br>
         その他の項目の場合は、読み取れた文字を確認修正してOKを押すとその値が入力されます。キャンセルを押すと、枠を選び直すことができます。
       </div>
       
-      <!-- 入力フォーム（並び順変更） -->
+      <!-- 入力フォーム -->
       <div class="field-group">
         <label for="dateField">日付:</label>
         <input type="text" id="dateField" placeholder="OCR結果">
@@ -103,7 +127,7 @@
         <label for="amountField">金額:</label>
         <input type="text" id="amountField" placeholder="OCR結果">
       </div>
-      <!-- 計算式と合計を金額入力フォームのすぐ下に表示（ボールド解除） -->
+      <!-- 計算式と合計（金額入力フォームのすぐ下に表示） -->
       <div class="field-group">
         <span class="field-label" style="font-weight: normal;">計算式:</span> <span id="amountExpression" class="normal-text"></span>
       </div>
@@ -180,6 +204,8 @@
     let currentCalcGroupIndex = null;
     // simpleDialog用の現在のグループインデックス
     let currentSimpleGroupIndex = null;
+    // 2セグメント用進捗保持変数（上部、下部）
+    let segmentProgress = [0, 0];
     
     /*************************************
      * 入力フォームのフォーカス処理
@@ -384,12 +410,23 @@
     
     /*************************************
      * showScreen: 画面遷移処理
+     * ※「戻る」ボタン押下時は、前回のOCR結果・グループ枠情報・プログレスバーをクリア
      *************************************/
     function showScreen(screenId) {
       document.querySelectorAll('.screen').forEach(screen => { screen.classList.toggle('active', screen.id === screenId); });
       window.scrollTo(0, 0);
-      if (screenId === 'screen1') { drawPcCanvasWithPoints(); }
-      if (screenId === 'screen2') { drawFsCanvas(); ocrWholeButton.click(); }
+      if (screenId === 'screen1') {
+        // 戻る時は前回のFSのグループ等をクリア
+        lastGroupBoxes = [];
+        groupOcrResults = {};
+        lastOcrData = null;
+        // クリアした状態でPCキャンバスを再描画
+        drawPcCanvasWithPoints();
+      }
+      if (screenId === 'screen2') { 
+        drawFsCanvas(); 
+        ocrWholeButton.click(); 
+      }
     }
     
     document.getElementById('nextToScreen2').addEventListener('click', function() {
@@ -552,9 +589,7 @@
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       draggingPointIndex = -1;
-      for (let i = 0; i < 4; i++) {
-        if (Math.hypot(detectedPoints[i].x - x, detectedPoints[i].y - y) < 15) { draggingPointIndex = i; break; }
-      }
+      for (let i = 0; i < 4; i++) { if (Math.hypot(detectedPoints[i].x - x, detectedPoints[i].y - y) < 15) { draggingPointIndex = i; break; } }
     });
     
     pcCanvas.addEventListener('pointermove', function(e) {
@@ -627,7 +662,7 @@
     
     const fsResetButton = document.getElementById('fsResetButton');
     const ocrWholeButton = document.getElementById('ocrWholeButton');
-    const ocrProgress = document.getElementById('ocrProgress');
+    // ※従来の progress 要素は削除し、カスタムプログレスバーを利用
     const dateField = document.getElementById('dateField');
     const amountField = document.getElementById('amountField');
     const payeeField = document.getElementById('payeeField');
@@ -735,34 +770,89 @@
       document.getElementById("amountExpression").textContent = "";
       document.getElementById("amountTotalDisplay").textContent = "";
       document.getElementById("noteField").value = "";
+      // プログレスバーもリセット
+      segmentProgress = [0, 0];
+      updateCustomProgressBar();
       drawFsCanvas();
     });
     
     /*************************************
-     * ocrWholeButton: 全体OCR実行（進捗は progress メーターで表示）
+     * カスタムプログレスバー更新関数
+     *************************************/
+    function updateCustomProgressBar() {
+      // 上半分の進捗を左側、下半分の進捗を右側に反映
+      document.getElementById("ocrProgressTop").style.width = (segmentProgress[0] * 50) + "%";
+      document.getElementById("ocrProgressBottom").style.width = (segmentProgress[1] * 50) + "%";
+    }
+    
+    /*************************************
+     * ocrWholeButton: 全体OCR実行（2分割OCR＋カスタムプログレスバー）
      *************************************/
     ocrWholeButton.addEventListener('click', async function() {
-      let progressElem = document.getElementById("ocrProgress");
-      progressElem.value = 0;
+      // リセット
+      segmentProgress = [0, 0];
+      updateCustomProgressBar();
       if (!fsImage.src) { console.error("fsImage.src が設定されていません。"); return; }
-      const worker = Tesseract.createWorker({
-        logger: m => { if(m.status==="recognizing text"){ progressElem.value = m.progress; } },
-        langPath: 'https://tessdata.projectnaptha.com/4.0.0_fast/'
-      });
-      try {
-        await worker.load();
-        await worker.loadLanguage('jpn');
-        await worker.initialize('jpn');
-        const { data } = await worker.recognize(fsImage.src);
-        lastOcrData = data;
-        // グループ化結果のテキスト表示は行わず、赤枠のみ描画
-        displayGroupedText(data);
-      } catch (err) {
-        console.error("全体OCRエラー:", err);
-      } finally {
-        await worker.terminate();
-      }
+      let combinedData = await ocrImageInTwoSegments(fsImage);
+      updateCustomProgressBar();
+      lastOcrData = combinedData;
+      displayGroupedText(combinedData);
     });
+    
+    /*************************************
+     * 画像を上下に2分割して並列OCR処理する関数
+     *************************************/
+    async function ocrImageInTwoSegments(image) {
+      // 画像の自然サイズで処理
+      let canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      let ctx = canvas.getContext('2d');
+      ctx.drawImage(image, 0, 0);
+      let halfHeight = Math.floor(canvas.height / 2);
+      
+      let segmentResults = await Promise.all(
+        [0, 1].map(async (segIndex) => {
+          let segHeight = segIndex === 0 ? halfHeight : (canvas.height - halfHeight);
+          let segCanvas = document.createElement('canvas');
+          segCanvas.width = canvas.width;
+          segCanvas.height = segHeight;
+          let segCtx = segCanvas.getContext('2d');
+          segCtx.drawImage(canvas, 0, segIndex * halfHeight, canvas.width, segHeight, 0, 0, canvas.width, segHeight);
+          let dataURL = segCanvas.toDataURL();
+          
+          const worker = Tesseract.createWorker({ 
+            logger: m => {
+              if(m.status==="recognizing text" && m.progress){
+                // 各セグメントの進捗を更新
+                segmentProgress[segIndex] = m.progress;
+                updateCustomProgressBar();
+              }
+            }
+          });
+          await worker.load();
+          await worker.loadLanguage('jpn');
+          await worker.initialize('jpn');
+          const { data } = await worker.recognize(dataURL);
+          await worker.terminate();
+          // 下半分の場合、bboxのy座標にオフセットを加算
+          if (segIndex === 1) {
+            data.words.forEach(word => {
+              word.bbox.y0 += halfHeight;
+              word.bbox.y1 += halfHeight;
+            });
+          }
+          return data;
+        })
+      );
+      
+      // 結果を結合
+      let combinedWords = [];
+      segmentResults.forEach(result => {
+        combinedWords = combinedWords.concat(result.words);
+      });
+      return { words: combinedWords };
+    }
     
     /*************************************
      * OCRグループ化関連関数
@@ -839,7 +929,7 @@
     }
     
     function displayGroupedText(data) {
-      // グループ化結果のテキスト表示は行わず、赤枠のみ描画
+      // 赤枠のみ描画
       drawFsCanvas();
       let avgAngle = computeAverageTilt(data.words);
       let wordsRotated = augmentWordsWithRotatedLeftY(data.words, avgAngle);
