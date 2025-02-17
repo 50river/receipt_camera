@@ -16,13 +16,35 @@
     h1, h2, h3, p { margin: 10px 0; }
     hr { margin: 20px 0; }
     /* キャンバスコンテナ */
-    #pcCanvasContainer, #fsCanvasContainer { position: relative; margin: 0 auto; }
+    #pcCanvasContainer, #fsCanvasContainer {
+      position: relative;
+      margin: 0 auto;
+    }
+    /* スクリーン２用：スマホ向け調整 */
+    @media (max-width: 600px) {
+      #fsCanvasContainer {
+        margin-left: 0;      /* 左寄せ */
+        margin-right: 20px;  /* 右側に余白を追加 */
+      }
+    }
     /* キャンバス */
-    #pcCanvas, #fsCanvas { border: 1px solid #ccc; cursor: crosshair; display: block; width: 100%; height: auto; touch-action: none; }
+    #pcCanvas, #fsCanvas {
+      border: 1px solid #ccc;
+      cursor: crosshair;
+      display: block;
+      width: 100%;
+      height: auto;
+      touch-action: none;
+    }
     /* ボタン */
     button { margin: 10px 5px; font-size: 1.5em; padding: 0.15em 0.25em; }
     /* 補正済み画像 */
-    #correctedImage { border: 1px solid #ccc; max-width: 50%; display: block; margin: 10px auto; }
+    #correctedImage {
+      border: 1px solid #ccc;
+      max-width: 50%;
+      display: block;
+      margin: 10px auto;
+    }
     /* 入力フィールド */
     .field-group { margin-top: 10px; }
     label { display: inline-block; width: 80px; font-weight: bold; }
@@ -58,18 +80,42 @@
     .instruction { margin: 10px 0; font-size: 0.9em; color: #555; }
     /* ダイアログ（計算用：金額項目用） */
     #calcDialog {
-      display: none; position: fixed; top: 50%; left: 50%;
-      transform: translate(-50%, -50%); background: #fff; border: 1px solid #ccc;
-      padding: 20px; z-index: 1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 20px;
+      z-index: 1000;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
     }
-    #calcDialog img { max-width: 100%; max-height: 150px; display: block; margin-bottom: 10px; }
+    #calcDialog img {
+      max-width: 100%;
+      max-height: 150px;
+      display: block;
+      margin-bottom: 10px;
+    }
     /* ダイアログ（シンプル版：金額以外用） */
     #simpleDialog {
-      display: none; position: fixed; top: 50%; left: 50%;
-      transform: translate(-50%, -50%); background: #fff; border: 1px solid #ccc;
-      padding: 20px; z-index: 1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 20px;
+      z-index: 1000;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
     }
-    #simpleDialog img { max-width: 100%; max-height: 150px; display: block; margin-bottom: 10px; }
+    #simpleDialog img {
+      max-width: 100%;
+      max-height: 150px;
+      display: block;
+      margin-bottom: 10px;
+    }
     @media (max-width: 600px) {
       #header { padding: 8px; font-size: 1.2em; }
       button { font-size: 1.2em; padding: 0.1em 0.2em; }
@@ -127,7 +173,7 @@
         <label for="amountField">金額:</label>
         <input type="text" id="amountField" placeholder="OCR結果">
       </div>
-      <!-- 計算式と合計（金額入力フォームのすぐ下に表示） -->
+      <!-- 計算式と合計（ボールド解除） -->
       <div class="field-group">
         <span class="field-label" style="font-weight: normal;">計算式:</span> <span id="amountExpression" class="normal-text"></span>
       </div>
@@ -340,7 +386,7 @@
           if (last.operator !== undefined) { calcSequence.push({ value: newVal }); }
         }
         updateAmountCalculation();
-        // 複数項目（演算子がある場合）のとき、備考欄に「計算式＝合計」を自動入力
+        // 複数項目の場合、備考欄に「計算式＝合計」を自動入力
         if(calcSequence.length > 1) {
           let expr = document.getElementById("amountExpression").textContent;
           let total = document.getElementById("amountTotalDisplay").textContent;
@@ -410,17 +456,20 @@
     
     /*************************************
      * showScreen: 画面遷移処理
-     * ※「戻る」ボタン押下時は、前回のOCR結果・グループ枠情報・プログレスバーをクリア
+     * 「戻る」ボタン押下時は前回のOCR結果・枠情報・プログレスバーをリセット
      *************************************/
     function showScreen(screenId) {
-      document.querySelectorAll('.screen').forEach(screen => { screen.classList.toggle('active', screen.id === screenId); });
+      document.querySelectorAll('.screen').forEach(screen => { 
+        screen.classList.toggle('active', screen.id === screenId); 
+      });
       window.scrollTo(0, 0);
       if (screenId === 'screen1') {
-        // 戻る時は前回のFSのグループ等をクリア
+        // 前回のFSの枠情報・OCR結果をクリア
         lastGroupBoxes = [];
         groupOcrResults = {};
         lastOcrData = null;
-        // クリアした状態でPCキャンバスを再描画
+        segmentProgress = [0, 0];
+        updateCustomProgressBar();
         drawPcCanvasWithPoints();
       }
       if (screenId === 'screen2') { 
@@ -662,7 +711,6 @@
     
     const fsResetButton = document.getElementById('fsResetButton');
     const ocrWholeButton = document.getElementById('ocrWholeButton');
-    // ※従来の progress 要素は削除し、カスタムプログレスバーを利用
     const dateField = document.getElementById('dateField');
     const amountField = document.getElementById('amountField');
     const payeeField = document.getElementById('payeeField');
@@ -770,7 +818,6 @@
       document.getElementById("amountExpression").textContent = "";
       document.getElementById("amountTotalDisplay").textContent = "";
       document.getElementById("noteField").value = "";
-      // プログレスバーもリセット
       segmentProgress = [0, 0];
       updateCustomProgressBar();
       drawFsCanvas();
@@ -780,7 +827,7 @@
      * カスタムプログレスバー更新関数
      *************************************/
     function updateCustomProgressBar() {
-      // 上半分の進捗を左側、下半分の進捗を右側に反映
+      // 上半分の進捗を左側（0～50%）、下半分の進捗を右側（0～50%）に反映
       document.getElementById("ocrProgressTop").style.width = (segmentProgress[0] * 50) + "%";
       document.getElementById("ocrProgressBottom").style.width = (segmentProgress[1] * 50) + "%";
     }
@@ -789,7 +836,6 @@
      * ocrWholeButton: 全体OCR実行（2分割OCR＋カスタムプログレスバー）
      *************************************/
     ocrWholeButton.addEventListener('click', async function() {
-      // リセット
       segmentProgress = [0, 0];
       updateCustomProgressBar();
       if (!fsImage.src) { console.error("fsImage.src が設定されていません。"); return; }
@@ -824,7 +870,6 @@
           const worker = Tesseract.createWorker({ 
             logger: m => {
               if(m.status==="recognizing text" && m.progress){
-                // 各セグメントの進捗を更新
                 segmentProgress[segIndex] = m.progress;
                 updateCustomProgressBar();
               }
@@ -835,7 +880,6 @@
           await worker.initialize('jpn');
           const { data } = await worker.recognize(dataURL);
           await worker.terminate();
-          // 下半分の場合、bboxのy座標にオフセットを加算
           if (segIndex === 1) {
             data.words.forEach(word => {
               word.bbox.y0 += halfHeight;
@@ -846,7 +890,6 @@
         })
       );
       
-      // 結果を結合
       let combinedWords = [];
       segmentResults.forEach(result => {
         combinedWords = combinedWords.concat(result.words);
@@ -929,7 +972,6 @@
     }
     
     function displayGroupedText(data) {
-      // 赤枠のみ描画
       drawFsCanvas();
       let avgAngle = computeAverageTilt(data.words);
       let wordsRotated = augmentWordsWithRotatedLeftY(data.words, avgAngle);
