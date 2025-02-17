@@ -25,21 +25,29 @@
     #correctedImage { border: 1px solid #ccc; max-width: 50%; display: block; margin: 10px auto; }
     /* 入力フィールド */
     .field-group { margin-top: 10px; }
-    label { display: inline-block; width: 80px; }
+    label { display: inline-block; width: 80px; font-weight: bold; }
     input[type="text"] { width: calc(100% - 90px); padding: 3px; }
     /* 計算式・合計表示エリア */
-    #amountExpression, #amountTotalDisplay { font-size: 1.2em; margin-top: 5px; color: #333; }
-    /* OCR進捗表示 */
-    #ocrOutput { white-space: pre-wrap; font-family: sans-serif; border: 1px solid #ccc; padding: 10px; background: #f9f9f9; margin-bottom: 10px; }
-    /* OCRパラメータ設定 */
-    #ocrThresholdControls { margin-top: 10px; padding: 10px; border: 1px solid #ccc; }
-    /* ダイアログ用 */
+    .field-label { font-weight: bold; }
+    .normal-text { font-weight: normal; }
+    /* OCR進捗メーター */
+    #ocrProgress { width: 100%; height: 20px; }
+    /* 指示文（FSキャンバス直下） */
+    .instruction { margin: 10px 0; font-size: 0.9em; color: #555; }
+    /* ダイアログ（計算用：金額項目用） */
     #calcDialog {
       display: none; position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%); background: #fff; border: 1px solid #ccc;
       padding: 20px; z-index: 1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);
     }
     #calcDialog img { max-width: 100%; max-height: 150px; display: block; margin-bottom: 10px; }
+    /* ダイアログ（シンプル版：金額以外用） */
+    #simpleDialog {
+      display: none; position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%); background: #fff; border: 1px solid #ccc;
+      padding: 20px; z-index: 1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+    #simpleDialog img { max-width: 100%; max-height: 150px; display: block; margin-bottom: 10px; }
     @media (max-width: 600px) {
       #header { padding: 8px; font-size: 1.2em; }
       button { font-size: 1.2em; padding: 0.1em 0.2em; }
@@ -56,7 +64,8 @@
     <div id="screen1" class="screen active">
       <h2>画像切り出し＆補正</h2>
       <p>画像ファイルを選択し、クロッピング用の編集枠を調整してください。</p>
-      <input type="file" id="imageInput" accept="image/*" capture="environment">
+      <!-- ファイル選択：capture属性を削除 -->
+      <input type="file" id="imageInput" accept="image/*">
       <div id="pcCanvasContainer"><canvas id="pcCanvas"></canvas></div>
       <button id="autoCropButton">自動切り出し＆補正を実行</button>
       <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
@@ -74,10 +83,18 @@
     <!-- スクリーン２：フィールド選択＆OCR -->
     <div id="screen2" class="screen">
       <h2>フィールド選択＆OCR</h2>
-      <div id="ocrOutput"></div>
+      <!-- OCR進捗メーター -->
+      <progress id="ocrProgress" value="0" max="1"></progress>
       <div id="fsCanvasContainer"><canvas id="fsCanvas"></canvas></div>
       
-      <!-- 入力フォーム -->
+      <!-- 指示文（FSキャンバス直下） -->
+      <div class="instruction">
+        入力フォームが選択されている状態で、領収書画像上の選択したい赤枠をタッチすると、選択した枠の画像とOCR結果が表示されます。<br>
+        金額項目の場合は「＋」「－」を押すと、次に入力するものを足すか引くかを指定でき、「＝」ボタンを押すと最終合計がフォームに反映されます。<br>
+        その他の項目の場合は、読み取れた文字を確認修正してOKを押すとその値が入力されます。キャンセルを押すと、枠を選び直すことができます。
+      </div>
+      
+      <!-- 入力フォーム（並び順変更） -->
       <div class="field-group">
         <label for="dateField">日付:</label>
         <input type="text" id="dateField" placeholder="OCR結果">
@@ -86,20 +103,12 @@
         <label for="amountField">金額:</label>
         <input type="text" id="amountField" placeholder="OCR結果">
       </div>
+      <!-- 計算式と合計を金額入力フォームのすぐ下に表示（ボールド解除） -->
       <div class="field-group">
-        <span>
-          金額フィールドが選択されている状態で、FSキャンバス上のグループをタッチするとダイアログが表示され、  
-          対象グループの画像とOCR結果が表示されます。<br>
-          ユーザーは数値を修正し、演算子ボタン（「＋」「－」「＝」）を選択してください。<br>
-          「＋」「－」の場合は、その修正結果と演算子が計算シーケンスに追加され、次の選択を待ちます。<br>
-          「＝」の場合は、最後の数値を登録し合計を計算して金額フィールドに反映されます。
-        </span>
+        <span class="field-label" style="font-weight: normal;">計算式:</span> <span id="amountExpression" class="normal-text"></span>
       </div>
       <div class="field-group">
-        <strong>計算式:</strong> <span id="amountExpression"></span>
-      </div>
-      <div class="field-group">
-        <strong>合計:</strong> <span id="amountTotalDisplay"></span>
+        <span class="field-label" style="font-weight: normal;">合計:</span> <span id="amountTotalDisplay" class="normal-text"></span>
       </div>
       <div class="field-group">
         <label for="payeeField">支払先:</label>
@@ -109,25 +118,18 @@
         <label for="descriptionField">摘要:</label>
         <input type="text" id="descriptionField" placeholder="OCR結果">
       </div>
+      <div class="field-group">
+        <label for="noteField">備考:</label>
+        <input type="text" id="noteField" placeholder="OCR結果">
+      </div>
       
       <button id="fsResetButton">フィールドリセット</button>
       <button id="ocrWholeButton">全体OCR実行</button>
-      <div id="ocrThresholdControls">
-        <h3>OCRグループ化パラメータ設定</h3>
-        <div style="margin-bottom: 10px;">
-          <label for="groupThresholdSlider">行グループ化閾値: <span id="groupThresholdValue">10</span>px</label>
-          <input type="range" id="groupThresholdSlider" min="5" max="50" value="10">
-        </div>
-        <div>
-          <label for="overlapThresholdSlider">横方向重なり閾値: <span id="overlapThresholdValue">0.5</span></label>
-          <input type="range" id="overlapThresholdSlider" min="0.1" max="1.0" step="0.1" value="0.5">
-        </div>
-      </div>
       <button id="backToScreen1">戻る</button>
     </div>
   </div>
   
-  <!-- ダイアログ（計算用） -->
+  <!-- ダイアログ（計算用：金額項目用） -->
   <div id="calcDialog">
     <div>
       <img id="calcDialogImage" src="" style="max-width:100%; max-height:150px; display:block; margin-bottom:10px;">
@@ -144,6 +146,21 @@
     </div>
   </div>
   
+  <!-- ダイアログ（シンプル版：金額以外用） -->
+  <div id="simpleDialog">
+    <div>
+      <img id="simpleDialogImage" src="" style="max-width:100%; max-height:150px; display:block; margin-bottom:10px;">
+    </div>
+    <div>
+      <label>数値:</label>
+      <input type="text" id="simpleDialogValue" />
+    </div>
+    <div style="margin-top:10px;">
+      <button id="simpleDialogOK">OK</button>
+      <button id="simpleDialogCancel">キャンセル</button>
+    </div>
+  </div>
+  
   <!-- ライブラリ読み込み -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
   <script async src="https://docs.opencv.org/3.4.0/opencv.js"></script>
@@ -152,20 +169,22 @@
     /*************************************
      * グローバル変数
      *************************************/
-    let lastGroupBoxes = [];    // 全体OCRで算出された各グループの赤枠情報
+    let lastGroupBoxes = [];    // 各グループの赤枠情報
     let lastOcrData = null;     // 全体OCR結果
     let groupOcrResults = {};   // 各グループのOCR結果
     let selectedGroupIndex = null; // 単一選択用
     let currentInput = null;    // 現在フォーカス中の入力フォーム
-    // 計算シーケンス：最初の値、その後「演算子」「値」のペア
+    // calcSequence：金額項目用の計算シーケンス（最初の値、その後「演算子」「値」のペア）
     let calcSequence = [];
-    // ダイアログで処理中のグループインデックス
+    // ダイアログで処理中のグループインデックス（calcDialog用）
     let currentCalcGroupIndex = null;
+    // simpleDialog用の現在のグループインデックス
+    let currentSimpleGroupIndex = null;
     
     /*************************************
      * 入力フォームのフォーカス処理
      *************************************/
-    ["dateField", "amountField", "payeeField", "descriptionField"].forEach(id => {
+    ["dateField", "amountField", "payeeField", "descriptionField", "noteField"].forEach(id => {
       const input = document.getElementById(id);
       input.addEventListener("focus", function() {
         currentInput = this;
@@ -180,7 +199,7 @@
     
     /*************************************
      * pasteOcrResultIntoInput
-     * 金額以外は選択されたグループのOCR結果を入力フォームに貼り付ける
+     * 金額以外の場合、選択されたグループのOCR結果を入力フォームに貼り付ける
      *************************************/
     function pasteOcrResultIntoInput() {
       if (currentInput && selectedGroupIndex !== null) {
@@ -192,9 +211,7 @@
           performOCROnField("selected", lastGroupBoxes[selectedGroupIndex])
             .then(resultText => {
               resultText = resultText.replace(/\s+/g, "");
-              if (currentInput.id === "dateField") {
-                resultText = processDateField(resultText);
-              }
+              if (currentInput.id === "dateField") { resultText = processDateField(resultText); }
               groupOcrResults[selectedGroupIndex] = resultText;
               currentInput.value = resultText;
               currentInput.focus();
@@ -207,7 +224,7 @@
     
     /*************************************
      * updateAmountCalculation
-     * calcSequence に基づいて計算式と合計金額を更新
+     * calcSequence に基づいて計算式と合計金額を更新（※金額項目用）
      *************************************/
     function updateAmountCalculation() {
       if (calcSequence.length === 0) return;
@@ -219,13 +236,8 @@
         if (!opObj || !numObj) break;
         let op = opObj.operator;
         let num = parseInt(numObj.value, 10) || 0;
-        if (op === "+") {
-          total += num;
-          expression += " + " + num;
-        } else if (op === "-") {
-          total -= num;
-          expression += " - " + num;
-        }
+        if (op === "+") { total += num; expression += " + " + num; }
+        else if (op === "-") { total -= num; expression += " - " + num; }
       }
       document.getElementById("amountExpression").textContent = expression;
       document.getElementById("amountTotalDisplay").textContent = total;
@@ -233,7 +245,7 @@
     }
     
     /*************************************
-     * ダイアログ操作用関数
+     * ダイアログ操作（calcDialog：金額項目用）
      *************************************/
     function openCalcDialog(groupIndex) {
       var box = lastGroupBoxes[groupIndex];
@@ -267,16 +279,11 @@
       currentCalcGroupIndex = null;
     }
     
-    // ダイアログ内「＋」ボタン
     document.getElementById('calcDialogPlus').addEventListener('click', function() {
       if (currentCalcGroupIndex !== null) {
         let newVal = document.getElementById('calcDialogValue').value;
-        groupOcrResults[currentCalcGroupIndex] = newVal; // 修正結果を更新
-        if (calcSequence.length === 0) {
-          // 初回なら、まず値を登録
-          calcSequence.push({ value: newVal });
-        }
-        // その後、常に演算子「＋」を登録
+        groupOcrResults[currentCalcGroupIndex] = newVal;
+        if (calcSequence.length === 0) { calcSequence.push({ value: newVal }); }
         calcSequence.push({ operator: "+" });
         updateAmountCalculation();
         closeCalcDialog();
@@ -284,14 +291,11 @@
       }
     });
     
-    // ダイアログ内「－」ボタン
     document.getElementById('calcDialogMinus').addEventListener('click', function() {
       if (currentCalcGroupIndex !== null) {
         let newVal = document.getElementById('calcDialogValue').value;
         groupOcrResults[currentCalcGroupIndex] = newVal;
-        if (calcSequence.length === 0) {
-          calcSequence.push({ value: newVal });
-        }
+        if (calcSequence.length === 0) { calcSequence.push({ value: newVal }); }
         calcSequence.push({ operator: "-" });
         updateAmountCalculation();
         closeCalcDialog();
@@ -299,38 +303,90 @@
       }
     });
     
-    // ダイアログ内「＝」ボタン
     document.getElementById('calcDialogEqual').addEventListener('click', function() {
       if (currentCalcGroupIndex !== null) {
         let newVal = document.getElementById('calcDialogValue').value;
         groupOcrResults[currentCalcGroupIndex] = newVal;
-        if (calcSequence.length === 0) {
-          calcSequence.push({ value: newVal });
+        if (calcSequence.length === 0) { 
+          calcSequence.push({ value: newVal }); 
         } else {
-          // もし直前が演算子なら、値を追加
           let last = calcSequence[calcSequence.length - 1];
-          if (last.operator !== undefined) {
-            calcSequence.push({ value: newVal });
-          }
+          if (last.operator !== undefined) { calcSequence.push({ value: newVal }); }
         }
         updateAmountCalculation();
+        // 複数項目（演算子がある場合）のとき、備考欄に「計算式＝合計」を自動入力
+        if(calcSequence.length > 1) {
+          let expr = document.getElementById("amountExpression").textContent;
+          let total = document.getElementById("amountTotalDisplay").textContent;
+          document.getElementById('noteField').value = expr + "＝" + total;
+        }
         closeCalcDialog();
         drawFsCanvas();
       }
     });
     
-    // ダイアログ内「キャンセル」ボタン
     document.getElementById('calcDialogCancel').addEventListener('click', function() {
       closeCalcDialog();
+    });
+    
+    /*************************************
+     * ダイアログ操作（simpleDialog：金額以外用）
+     *************************************/
+    function openSimpleDialog(groupIndex) {
+      var box = lastGroupBoxes[groupIndex];
+      var tempCanvas = document.createElement('canvas');
+      tempCanvas.width = box.width / fsScale;
+      tempCanvas.height = box.height / fsScale;
+      var tempCtx = tempCanvas.getContext('2d');
+      tempCtx.drawImage(fsImage, box.x / fsScale, box.y / fsScale, box.width / fsScale, box.height / fsScale, 0, 0, tempCanvas.width, tempCanvas.height);
+      document.getElementById('simpleDialogImage').src = tempCanvas.toDataURL();
+      
+      if (groupOcrResults.hasOwnProperty(groupIndex)) {
+        document.getElementById('simpleDialogValue').value = groupOcrResults[groupIndex];
+        showSimpleDialog(groupIndex);
+      } else {
+        performOCROnField("nonAmount", box).then(resultText => {
+          var cleaned = resultText.replace(/\s+/g, "");
+          groupOcrResults[groupIndex] = cleaned;
+          document.getElementById('simpleDialogValue').value = cleaned;
+          showSimpleDialog(groupIndex);
+        });
+      }
+    }
+    
+    function showSimpleDialog(groupIndex) {
+      currentSimpleGroupIndex = groupIndex;
+      document.getElementById('simpleDialog').style.display = 'block';
+    }
+    
+    function closeSimpleDialog() {
+      document.getElementById('simpleDialog').style.display = 'none';
+      currentSimpleGroupIndex = null;
+    }
+    
+    document.getElementById('simpleDialogOK').addEventListener('click', function() {
+      if (currentSimpleGroupIndex !== null) {
+        let newVal = document.getElementById('simpleDialogValue').value;
+        groupOcrResults[currentSimpleGroupIndex] = newVal;
+        if (currentInput) {
+          currentInput.value = newVal;
+          currentInput.focus();
+          currentInput = null;
+        }
+        closeSimpleDialog();
+        drawFsCanvas();
+      }
+    });
+    
+    document.getElementById('simpleDialogCancel').addEventListener('click', function() {
+      closeSimpleDialog();
     });
     
     /*************************************
      * showScreen: 画面遷移処理
      *************************************/
     function showScreen(screenId) {
-      document.querySelectorAll('.screen').forEach(screen => {
-        screen.classList.toggle('active', screen.id === screenId);
-      });
+      document.querySelectorAll('.screen').forEach(screen => { screen.classList.toggle('active', screen.id === screenId); });
       window.scrollTo(0, 0);
       if (screenId === 'screen1') { drawPcCanvasWithPoints(); }
       if (screenId === 'screen2') { drawFsCanvas(); ocrWholeButton.click(); }
@@ -383,7 +439,7 @@
     };
     
     /*************************************
-     * autoCrop: 画像から自動で4点を検出してpcCanvasに描画
+     * autoCrop: 画像から自動で4点検出してpcCanvasに描画
      *************************************/
     function autoCrop() {
       if (!pcImage.src) { alert("画像が読み込まれていません。"); return; }
@@ -447,7 +503,7 @@
     }
     
     /*************************************
-     * orderPoints: 4点を左上、右上、右下、左下の順に整列
+     * orderPoints: 4点整列
      *************************************/
     function orderPoints(pts) {
       const sumArr = pts.map(p => p.x + p.y);
@@ -460,7 +516,7 @@
     }
     
     /*************************************
-     * drawPcCanvasWithPoints: PCキャンバスに画像、検出点、接続線を描画
+     * drawPcCanvasWithPoints: PCキャンバス描画
      *************************************/
     function drawPcCanvasWithPoints() {
       pcCtx.clearRect(0, 0, pcCanvas.width, pcCanvas.height);
@@ -561,8 +617,7 @@
     });
     
     /*************************************
-     * FSモード：フィールド選択＆OCR処理
-     * 対象項目ドロップダウンと「選択領域でOCR実行」ボタンは廃止
+     * FSモード：フィールド選択＆OCR処理（対象項目廃止）
      *************************************/
     let fsImage = new Image();
     const fsCanvas = document.getElementById('fsCanvas');
@@ -570,14 +625,14 @@
     let fsScale = 1;
     let fsFieldRegions = {}; // 金額項目のみ自動登録
     
-    // 対象項目廃止
     const fsResetButton = document.getElementById('fsResetButton');
     const ocrWholeButton = document.getElementById('ocrWholeButton');
-    const ocrOutput = document.getElementById('ocrOutput');
+    const ocrProgress = document.getElementById('ocrProgress');
     const dateField = document.getElementById('dateField');
     const amountField = document.getElementById('amountField');
     const payeeField = document.getElementById('payeeField');
     const descriptionField = document.getElementById('descriptionField');
+    const noteField = document.getElementById('noteField');
     
     fsImage.onload = function() {
       const maxDisplayWidth = window.innerWidth - 40;
@@ -608,7 +663,7 @@
       }
       if (lastGroupBoxes.length > 0) { drawGroupedBoxes(lastGroupBoxes); }
       if (currentInput && currentInput.id === "amountField") {
-        // ハイライトはここではcalcSequenceの表示は任意。今回はダイアログを表示するので省略
+        // 金額項目はダイアログで処理するためハイライトは不要
       } else {
         if (selectedGroupIndex !== null && lastGroupBoxes[selectedGroupIndex]) {
           fsCtx.strokeStyle = "orange";
@@ -662,14 +717,14 @@
       const width = Math.abs(fsCurrentX - fsStartX);
       const height = Math.abs(fsCurrentY - fsStartY);
       if (width === 0 || height === 0) return;
-      let field = "amount"; // 自動登録
+      let field = "amount";
       if (!fsFieldRegions[field]) fsFieldRegions[field] = [];
       fsFieldRegions[field].push({ x, y, width, height });
       drawFsCanvas();
     });
     
     /*************************************
-     * fsResetButton: フィールドリセット
+     * fsResetButton: リセット
      *************************************/
     fsResetButton.addEventListener('click', function() {
       fsFieldRegions = {};
@@ -679,21 +734,19 @@
       calcSequence = [];
       document.getElementById("amountExpression").textContent = "";
       document.getElementById("amountTotalDisplay").textContent = "";
+      document.getElementById("noteField").value = "";
       drawFsCanvas();
     });
     
     /*************************************
-     * ocrWholeButton: 全体OCR実行
+     * ocrWholeButton: 全体OCR実行（進捗は progress メーターで表示）
      *************************************/
     ocrWholeButton.addEventListener('click', async function() {
-      ocrOutput.textContent = "全体OCR（高速モデル）実行中...\n";
-      if (!fsImage.src) {
-        console.error("fsImage.src が設定されていません。");
-        ocrOutput.textContent += "エラー: 画像が読み込まれていません。\n";
-        return;
-      }
-      const worker = Tesseract.createWorker({ 
-        logger: m => console.log("全体OCR（高速）:", m),
+      let progressElem = document.getElementById("ocrProgress");
+      progressElem.value = 0;
+      if (!fsImage.src) { console.error("fsImage.src が設定されていません。"); return; }
+      const worker = Tesseract.createWorker({
+        logger: m => { if(m.status==="recognizing text"){ progressElem.value = m.progress; } },
         langPath: 'https://tessdata.projectnaptha.com/4.0.0_fast/'
       });
       try {
@@ -702,11 +755,10 @@
         await worker.initialize('jpn');
         const { data } = await worker.recognize(fsImage.src);
         lastOcrData = data;
-        ocrOutput.textContent += "全体OCR完了。\n";
+        // グループ化結果のテキスト表示は行わず、赤枠のみ描画
         displayGroupedText(data);
       } catch (err) {
         console.error("全体OCRエラー:", err);
-        ocrOutput.textContent += "エラーが発生しました。\n" + err;
       } finally {
         await worker.terminate();
       }
@@ -787,6 +839,7 @@
     }
     
     function displayGroupedText(data) {
+      // グループ化結果のテキスト表示は行わず、赤枠のみ描画
       drawFsCanvas();
       let avgAngle = computeAverageTilt(data.words);
       let wordsRotated = augmentWordsWithRotatedLeftY(data.words, avgAngle);
@@ -796,9 +849,7 @@
         let horizontalGroups = groupWordsHorizontally(group);
         horizontalGroups.forEach(subgroup => finalGroups.push(subgroup));
       });
-      let groupedText = "\n【グループ化されたOCR結果】\n";
       let boxes = finalGroups.map((group, index) => {
-        groupedText += `Group ${index + 1}: ${group.map(w => w.text).join(" ")}\n`;
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         group.forEach(word => {
           let bbox = completeBBox(word.bbox);
@@ -813,8 +864,6 @@
         });
         return { x: minX * fsScale, y: minY * fsScale, width: (maxX - minX) * fsScale, height: (maxY - minY) * fsScale };
       });
-      ocrOutput.textContent += groupedText;
-      console.log(groupedText);
       lastGroupBoxes = boxes;
       drawGroupedBoxes(boxes);
     }
@@ -854,11 +903,6 @@
         fsCtx.strokeStyle = "red";
         fsCtx.lineWidth = 3;
         fsCtx.strokeRect(box.x, box.y, box.width, box.height);
-        fsCtx.fillStyle = "red";
-        fsCtx.font = "16px Arial";
-        fsCtx.textBaseline = "top";
-        fsCtx.textAlign = "left";
-        fsCtx.fillText("Group " + (index + 1), box.x, box.y - 5);
       });
     }
     
@@ -984,24 +1028,15 @@
     const flipButton = document.getElementById('flipButton');
     
     rotate90Button.addEventListener('click', function() {
-      rotateImage(correctedImage.src, 90).then(newDataURL => {
-        correctedImage.src = newDataURL;
-        fsImage.src = newDataURL;
-      });
+      rotateImage(correctedImage.src, 90).then(newDataURL => { correctedImage.src = newDataURL; fsImage.src = newDataURL; });
     });
     
     rotateNeg90Button.addEventListener('click', function() {
-      rotateImage(correctedImage.src, -90).then(newDataURL => {
-        correctedImage.src = newDataURL;
-        fsImage.src = newDataURL;
-      });
+      rotateImage(correctedImage.src, -90).then(newDataURL => { correctedImage.src = newDataURL; fsImage.src = newDataURL; });
     });
     
     flipButton.addEventListener('click', function() {
-      flipImage(correctedImage.src).then(newDataURL => {
-        correctedImage.src = newDataURL;
-        fsImage.src = newDataURL;
-      });
+      flipImage(correctedImage.src).then(newDataURL => { correctedImage.src = newDataURL; fsImage.src = newDataURL; });
     });
     
     function rotateImage(dataURL, angle) {
@@ -1010,13 +1045,8 @@
         img.onload = function() {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          if (angle % 180 !== 0) {
-            canvas.width = img.height;
-            canvas.height = img.width;
-          } else {
-            canvas.width = img.width;
-            canvas.height = img.height;
-          }
+          if (angle % 180 !== 0) { canvas.width = img.height; canvas.height = img.width; }
+          else { canvas.width = img.width; canvas.height = img.height; }
           ctx.save();
           ctx.translate(canvas.width / 2, canvas.height / 2);
           ctx.rotate(angle * Math.PI / 180);
@@ -1034,8 +1064,7 @@
         const img = new Image();
         img.onload = function() {
           const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
+          canvas.width = img.width; canvas.height = img.height;
           const ctx = canvas.getContext('2d');
           ctx.save();
           ctx.translate(img.width, 0);
@@ -1050,25 +1079,8 @@
     }
     
     /*************************************
-     * スライダー処理：OCRパラメータ更新
-     *************************************/
-    const groupThresholdSlider = document.getElementById("groupThresholdSlider");
-    const groupThresholdValue = document.getElementById("groupThresholdValue");
-    groupThresholdSlider.addEventListener("input", () => {
-      groupThresholdValue.textContent = groupThresholdSlider.value;
-      updateGroupedBoxes();
-    });
-    
-    const overlapThresholdSlider = document.getElementById("overlapThresholdSlider");
-    const overlapThresholdValue = document.getElementById("overlapThresholdValue");
-    overlapThresholdSlider.addEventListener("input", () => {
-      overlapThresholdValue.textContent = overlapThresholdSlider.value;
-      updateGroupedBoxes();
-    });
-    
-    /*************************************
      * FSキャンバス上でのグループ選択処理
-     * 金額フィールドにフォーカス中なら、タッチされたグループのダイアログを表示
+     * 入力フォームが選択されている場合、金額項目なら calcDialog、その他は simpleDialog を表示
      *************************************/
     fsCanvas.addEventListener("click", function(e) {
       const rect = fsCanvas.getBoundingClientRect();
@@ -1081,18 +1093,13 @@
       for (let i = 0; i < lastGroupBoxes.length; i++) {
         let box = lastGroupBoxes[i];
         if (clickX >= box.x && clickX <= box.x + box.width &&
-            clickY >= box.y && clickY <= box.y + box.height) {
-          foundIndex = i;
-          break;
-        }
+            clickY >= box.y && clickY <= box.y + box.height) { foundIndex = i; break; }
       }
       if (foundIndex !== null) {
-        if (currentInput && currentInput.id === "amountField") {
-          openCalcDialog(foundIndex);
-        } else {
-          selectedGroupIndex = foundIndex;
-          drawFsCanvas();
-          if (currentInput) { pasteOcrResultIntoInput(); }
+        if (currentInput && currentInput.id === "amountField") { 
+          openCalcDialog(foundIndex); 
+        } else { 
+          openSimpleDialog(foundIndex); 
         }
       } else {
         console.log("クリック位置に一致するグループ枠がありません。");
