@@ -93,9 +93,13 @@
     <div id="screen1" class="screen active">
       <h2>画像切り出し＆補正</h2>
       <p>画像ファイルを選択し、クロッピング用の編集枠を調整してください。</p>
+      <!-- ファイル選択 -->
       <input type="file" id="imageInput" accept="image/*">
       <div id="pcCanvasContainer"><canvas id="pcCanvas"></canvas></div>
+      <!-- 自動切り出し＆補正ボタン -->
       <button id="autoCropButton">自動切り出し＆補正を実行</button>
+      <!-- 新規追加：そのまま取り込むボタン -->
+      <button id="importAsIsButton">そのまま取り込む</button>
       <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
       <h3>補正結果</h3>
       <img id="correctedImage" alt="Corrected Image">
@@ -134,7 +138,6 @@
         <label for="amountField">金額:</label>
         <input type="text" id="amountField" placeholder="OCR結果">
       </div>
-      <!-- 計算式と合計（ボールド解除） -->
       <div class="field-group">
         <span class="field-label" style="font-weight: normal;">計算式:</span> <span id="amountExpression" class="normal-text"></span>
       </div>
@@ -425,7 +428,7 @@
       });
       window.scrollTo(0, 0);
       if (screenId === 'screen1') {
-        // 前回のFSの枠情報・OCR結果をクリア
+        // 前回のFSの枠情報・OCR結果・進捗をクリア
         lastGroupBoxes = [];
         groupOcrResults = {};
         lastOcrData = null;
@@ -446,6 +449,17 @@
     
     document.getElementById('backToScreen1').addEventListener('click', function() {
       showScreen('screen1');
+    });
+    
+    /*************************************
+     * 新規追加：そのまま取り込むボタン処理
+     *************************************/
+    document.getElementById('importAsIsButton').addEventListener('click', function() {
+      if (!pcImage.src) { alert("画像が読み込まれていません。"); return; }
+      // そのまま取り込む場合、元画像（pcImage）を補正画像として利用
+      correctedImage.src = pcImage.src;
+      fsImage.src = pcImage.src;
+      showScreen('screen2');
     });
     
     /*************************************
@@ -846,7 +860,6 @@
           await worker.initialize('jpn');
           const { data } = await worker.recognize(dataURL);
           await worker.terminate();
-          // 下半分の場合、bboxのy座標にオフセットを加算
           if (segIndex === 1) {
             data.words.forEach(word => {
               word.bbox.y0 += halfHeight;
@@ -1072,33 +1085,19 @@
     
     /*************************************
      * replaceCircledNumbers:
-     * 囲み数字（丸数字）を最大50まで対応するように、Unicodeコードポイントに基づいて数値に置換
+     * 囲み数字（丸数字）を最大50まで対応する（Unicodeのコードポイントに基づいて変換）
      *************************************/
     function replaceCircledNumbers(text) {
       return text.replace(/([\u24EA\u2460-\u2473\u3251-\u325F\u32B1-\u32BF])/g, function(match) {
         const code = match.charCodeAt(0);
-        // ⓪
-        if (code === 0x24EA) {
-          return "0";
-        }
-        // ①～⑳: U+2460 (9312) ～ U+2473 (9323) → 1～20
-        if (code >= 0x2460 && code <= 0x2473) {
-          return String(code - 0x245F); // 0x245F = 9311
-        }
-        // ㉑～㉟: U+3251 (12881) ～ U+325F (12895) → 21～35
-        if (code >= 0x3251 && code <= 0x325F) {
-          return String(code - 0x3240); // 0x3240 = 12864
-        }
-        // ㊱～㊿: U+32B1 (12977) ～ U+32BF (12991) → 36～50
-        if (code >= 0x32B1 && code <= 0x32BF) {
-          return String(code - 0x3295); // 0x3295 = 12981? Let's check: 12977 - 12981 = -4? Hmm.
-          // Let's compute: we want U+32B1 to map to 36.
-          // Let offset = code - number. So for code=0x32B1=12977, we want 12977 - offset = 36, so offset = 12941.
-        }
-        if (code >= 0x32B1 && code <= 0x32BF) {
-          return String(code - 12941);
-        }
-        // 該当しなければそのまま返す
+        // ⓪ (U+24EA)
+        if (code === 0x24EA) return "0";
+        // ①～⑳ (U+2460～U+2473) → 1～20
+        if (code >= 0x2460 && code <= 0x2473) return String(code - 0x245F);
+        // ㉑～㉟ (U+3251～U+325F) → 21～35
+        if (code >= 0x3251 && code <= 0x325F) return String(code - 0x3240);
+        // ㊱～㊿ (U+32B1～U+32BF) → 36～50
+        if (code >= 0x32B1 && code <= 0x32BF) return String(code - 12941);
         return match;
       });
     }
