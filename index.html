@@ -4,83 +4,226 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>領収書OCRアプリ</title>
+  <!-- Google Fonts: Noto Sans JP -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    /* ページ全体の基本レイアウト */
-    body { margin: 0; font-family: Arial, sans-serif; background: #f0f0f0; }
-    #app { width: 100%; max-width: 600px; margin: 0 auto; background: #fff; min-height: 100vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    /* 全体リセット・フォント設定 */
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Noto Sans JP', Arial, sans-serif;
+      background: #f7f7f7;
+      color: #333;
+    }
+    #app {
+      width: 100%;
+      max-width: 600px;
+      margin: 20px auto;
+      background: #fff;
+      min-height: 100vh;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
     /* ヘッダー */
-    #header { background: #007aff; color: #fff; padding: 10px; text-align: center; }
-    /* 各スクリーン */
-    .screen { display: none; padding: 10px; }
+    #header {
+      background: linear-gradient(135deg, #007aff, #00c6ff);
+      color: #fff;
+      padding: 15px;
+      text-align: center;
+    }
+    #header h1 { margin: 0; font-size: 1.8em; }
+    /* スクリーン */
+    .screen {
+      display: none;
+      padding: 20px;
+      animation: fadeIn 0.3s ease;
+    }
     .screen.active { display: block; }
-    h1, h2, h3, p { margin: 10px 0; }
+    h2, h3, p { margin: 15px 0; }
     hr { margin: 20px 0; }
     /* キャンバスコンテナ */
-    #pcCanvasContainer, #fsCanvasContainer { position: relative; margin: 0 auto; }
-    /* スクリーン２用：スマホ向け調整 */
-    @media (max-width: 600px) {
-      #fsCanvasContainer {
-        margin-left: 0;      /* 左寄せ */
-        margin-right: 20px;  /* 右側に余白を追加 */
-      }
+    #pcCanvasContainer, #fsCanvasContainer { 
+      position: relative; 
+      margin: 0 auto; 
     }
     /* キャンバス */
-    #pcCanvas, #fsCanvas { border: 1px solid #ccc; cursor: crosshair; display: block; width: 100%; height: auto; touch-action: none; }
-    /* ボタン */
-    button { margin: 10px 5px; font-size: 1.5em; padding: 0.15em 0.25em; }
-    /* 補正済み画像 */
-    #correctedImage { border: 1px solid #ccc; max-width: 50%; display: block; margin: 10px auto; }
-    /* 入力フィールド */
-    .field-group { margin-top: 10px; }
-    label { display: inline-block; width: 80px; font-weight: bold; }
-    input[type="text"] { width: calc(100% - 90px); padding: 3px; }
-    /* 計算式・合計表示エリア */
-    .field-label { font-weight: bold; }
-    .normal-text { font-weight: normal; }
-    /* カスタムプログレスバー */
-    #ocrProgressContainer {
-      position: relative;
+    #pcCanvas, #fsCanvas {
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      cursor: crosshair;
+      display: block;
       width: 100%;
-      height: 20px;
-      background: #ddd;
-      margin-bottom: 10px;
+      height: auto;
+      background: #fafafa;
     }
-    #ocrProgressTop {
+    /* プログレスオーバーレイ */
+    #ocrProgressOverlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+    }
+    #ocrProgressTop, #ocrProgressBottom {
       position: absolute;
       left: 0;
+      right: 0;
+      height: 0;
+      transition: height 0.3s ease;
+    }
+    #ocrProgressTop {
       top: 0;
-      height: 100%;
-      width: 0;
-      background: #4caf50;
+      background: rgba(0, 122, 255, 0.3);
     }
     #ocrProgressBottom {
+      bottom: 0;
+      background: rgba(33, 150, 243, 0.3);
+    }
+    /* グローエフェクト（バーの先端部） */
+    #ocrProgressTop .glow-tip {
       position: absolute;
+      bottom: 0;
+      left: 0;
       right: 0;
+      height: 12px;
+      background: radial-gradient(circle, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 70%);
+      filter: drop-shadow(0 0 10px rgba(255,255,255,1));
+      animation: pulse 0.8s infinite alternate;
+    }
+    #ocrProgressBottom .glow-tip {
+      position: absolute;
       top: 0;
-      height: 100%;
-      width: 0;
-      background: #2196f3;
+      left: 0;
+      right: 0;
+      height: 12px;
+      background: radial-gradient(circle, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 70%);
+      filter: drop-shadow(0 0 10px rgba(255,255,255,1));
+      animation: pulse 0.8s infinite alternate;
     }
-    /* 指示文（FSキャンバス直下） */
-    .instruction { margin: 10px 0; font-size: 0.9em; color: #555; }
-    /* ダイアログ（計算用：金額項目用） */
-    #calcDialog {
-      display: none; position: fixed; top: 50%; left: 50%;
-      transform: translate(-50%, -50%); background: #fff; border: 1px solid #ccc;
-      padding: 20px; z-index: 1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    @keyframes pulse {
+      0% { transform: scaleX(0.8); opacity: 0.8; }
+      100% { transform: scaleX(1.2); opacity: 1; }
     }
-    #calcDialog img { max-width: 100%; max-height: 150px; display: block; margin-bottom: 10px; }
-    /* ダイアログ（シンプル版：金額以外用） */
-    #simpleDialog {
-      display: none; position: fixed; top: 50%; left: 50%;
-      transform: translate(-50%, -50%); background: #fff; border: 1px solid #ccc;
-      padding: 20px; z-index: 1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    /* バーストアニメーション（パァーン感） */
+    .burst {
+      animation: burstOut 0.5s forwards;
     }
-    #simpleDialog img { max-width: 100%; max-height: 150px; display: block; margin-bottom: 10px; }
+    @keyframes burstOut {
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(1.5);
+        opacity: 0;
+      }
+    }
+    /* 下準備完了テキスト */
+    #preparationComplete {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 2em;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px 20px;
+      border-radius: 8px;
+      display: none;
+      z-index: 20;
+    }
+    /* ボタン */
+    button {
+      margin: 10px 5px;
+      font-size: 1.1em;
+      padding: 0.4em 0.7em;
+      border: none;
+      border-radius: 4px;
+      background: #007aff;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    button:hover { background: #005bb5; }
+    /* 入力フィールド */
+    .field-group { margin-top: 15px; }
+    label { display: inline-block; width: 80px; font-weight: bold; }
+    input[type="text"] {
+      width: calc(100% - 90px);
+      padding: 5px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .field-label { font-weight: bold; }
+    .normal-text { font-weight: normal; }
+    /* 補正済み画像 */
+    #correctedImage {
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      max-width: 100%;
+      display: block;
+      margin: 15px auto;
+      position: relative;
+    }
+    /* スピナー */
+    .spinner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 40px;
+      height: 40px;
+      margin: -20px 0 0 -20px;
+      border: 4px solid rgba(0,0,0,0.1);
+      border-top-color: #007aff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      z-index: 10;
+    }
+    /* ダイアログ */
+    #calcDialog, #simpleDialog {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 20px;
+      z-index: 1000;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      border-radius: 8px;
+      width: 90%;
+      max-width: 400px;
+    }
+    #calcDialog img, #simpleDialog img {
+      max-width: 100%;
+      max-height: 150px;
+      display: block;
+      margin-bottom: 10px;
+      border-radius: 4px;
+    }
+    /* レスポンシブ */
     @media (max-width: 600px) {
-      #header { padding: 8px; font-size: 1.2em; }
-      button { font-size: 1.2em; padding: 0.1em 0.2em; }
+      #header { padding: 10px; font-size: 1.4em; }
+      button { font-size: 1em; padding: 0.3em 0.5em; }
       input[type="text"] { font-size: 1em; }
+      #fsCanvasContainer {
+        margin-left: 0;
+        margin-right: 20px;
+      }
+    }
+    /* アニメーション */
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    /* FSキャンバス内の選択枠 */
+    .fs-box {
+      border: 3px solid #e74c3c;
+      border-radius: 3px;
     }
   </style>
 </head>
@@ -98,11 +241,15 @@
       <div id="pcCanvasContainer"><canvas id="pcCanvas"></canvas></div>
       <!-- 自動切り出し＆補正ボタン -->
       <button id="autoCropButton">自動切り出し＆補正を実行</button>
-      <!-- 新規追加：そのまま取り込むボタン -->
+      <!-- そのまま取り込むボタン -->
       <button id="importAsIsButton">そのまま取り込む</button>
       <button id="confirmPointsButton" style="display:none;">ポイント確定</button>
       <h3>補正結果</h3>
-      <img id="correctedImage" alt="Corrected Image">
+      <div style="position:relative; display:inline-block;">
+        <!-- 画像読み込み中用スピナー -->
+        <div id="imageSpinner" class="spinner"></div>
+        <img id="correctedImage" alt="Corrected Image">
+      </div>
       <div id="transformControls" style="display:none; margin-top:10px;">
         <button id="rotate90Button">Rotate 90°</button>
         <button id="rotateNeg90Button">Rotate -90°</button>
@@ -115,15 +262,22 @@
     <!-- スクリーン２：フィールド選択＆OCR -->
     <div id="screen2" class="screen">
       <h2>フィールド選択＆OCR</h2>
-      <!-- カスタムプログレスバー -->
-      <div id="ocrProgressContainer">
-        <div id="ocrProgressTop"></div>
-        <div id="ocrProgressBottom"></div>
+      <!-- fsCanvasコンテナにプログレスオーバーレイと下準備完了の文字を追加 -->
+      <div id="fsCanvasContainer">
+        <canvas id="fsCanvas"></canvas>
+        <div id="ocrProgressOverlay">
+          <div id="ocrProgressTop">
+            <div class="glow-tip"></div>
+          </div>
+          <div id="ocrProgressBottom">
+            <div class="glow-tip"></div>
+          </div>
+        </div>
+        <div id="preparationComplete">下準備完了</div>
       </div>
-      <div id="fsCanvasContainer"><canvas id="fsCanvas"></canvas></div>
       
       <!-- 指示文 -->
-      <div class="instruction">
+      <div class="instruction" style="font-size:0.9em; color:#555;">
         入力フォームが選択されている状態で、領収書画像上の選択したい赤枠をタッチすると、選択した枠の画像とOCR結果が表示されます。<br>
         金額項目の場合は「＋」「－」を押すと、次に入力するものを足すか引くかを指定でき、「＝」ボタンを押すと最終合計がフォームに反映されます。<br>
         その他の項目の場合は、読み取れた文字を確認修正してOKを押すとその値が入力されます。キャンセルを押すと、枠を選び直すことができます。
@@ -166,7 +320,7 @@
   <!-- ダイアログ（計算用：金額項目用） -->
   <div id="calcDialog">
     <div>
-      <img id="calcDialogImage" src="" style="max-width:100%; max-height:150px; display:block; margin-bottom:10px;">
+      <img id="calcDialogImage" src="" alt="Calc Image">
     </div>
     <div>
       <label>数値:</label>
@@ -183,7 +337,7 @@
   <!-- ダイアログ（シンプル版：金額以外用） -->
   <div id="simpleDialog">
     <div>
-      <img id="simpleDialogImage" src="" style="max-width:100%; max-height:150px; display:block; margin-bottom:10px;">
+      <img id="simpleDialogImage" src="" alt="Simple Dialog Image">
     </div>
     <div>
       <label>数値:</label>
@@ -435,6 +589,8 @@
         segmentProgress = [0, 0];
         updateCustomProgressBar();
         drawPcCanvasWithPoints();
+        // FS用のオーバーレイを再表示
+        document.getElementById("ocrProgressOverlay").style.display = "block";
       }
       if (screenId === 'screen2') { 
         drawFsCanvas(); 
@@ -476,7 +632,6 @@
     const imageInput = document.getElementById('imageInput');
     const autoCropButton = document.getElementById('autoCropButton');
     const confirmPointsButton = document.getElementById('confirmPointsButton');
-    const correctedImage = document.getElementById('correctedImage');
     const transformControls = document.getElementById('transformControls');
     
     imageInput.addEventListener('change', function(e) {
@@ -804,12 +959,12 @@
     });
     
     /*************************************
-     * カスタムプログレスバー更新関数
+     * カスタムプログレスバー更新関数（上下オーバーレイ）
      *************************************/
     function updateCustomProgressBar() {
-      // 上半分の進捗を左側（0～50%）、下半分の進捗を右側（0～50%）に反映
-      document.getElementById("ocrProgressTop").style.width = (segmentProgress[0] * 50) + "%";
-      document.getElementById("ocrProgressBottom").style.width = (segmentProgress[1] * 50) + "%";
+      // 上半分の進捗を上からの高さに、下半分の進捗を下からの高さに反映
+      document.getElementById("ocrProgressTop").style.height = (segmentProgress[0] * 50) + "%";
+      document.getElementById("ocrProgressBottom").style.height = (segmentProgress[1] * 50) + "%";
     }
     
     /*************************************
@@ -818,11 +973,28 @@
     ocrWholeButton.addEventListener('click', async function() {
       segmentProgress = [0, 0];
       updateCustomProgressBar();
+      // OCR処理開始時はオーバーレイを表示
+      document.getElementById("ocrProgressOverlay").style.display = "block";
       if (!fsImage.src) { console.error("fsImage.src が設定されていません。"); return; }
       let combinedData = await ocrImageInTwoSegments(fsImage);
       updateCustomProgressBar();
       lastOcrData = combinedData;
       displayGroupedText(combinedData);
+      // OCR処理完了時、「下準備完了」の文字を表示
+      const completeText = document.getElementById("preparationComplete");
+      completeText.style.display = "block";
+      // 2秒後にバーストアニメーションを実行
+      setTimeout(() => {
+        const overlay = document.getElementById("ocrProgressOverlay");
+        overlay.classList.add("burst");
+        completeText.classList.add("burst");
+        overlay.addEventListener("animationend", function() {
+          overlay.style.display = "none";
+        });
+        completeText.addEventListener("animationend", function() {
+          completeText.style.display = "none";
+        });
+      }, 2000);
     });
     
     /*************************************
@@ -1224,6 +1396,16 @@
         console.log("クリック位置に一致するグループ枠がありません。");
         drawFsCanvas();
       }
+    });
+    
+    /*************************************
+     * correctedImage読み込み完了時にスピナーを非表示にする
+     *************************************/
+    correctedImage.addEventListener('load', function() {
+      document.getElementById('imageSpinner').style.display = 'none';
+    });
+    correctedImage.addEventListener('error', function() {
+      document.getElementById('imageSpinner').style.display = 'none';
     });
   </script>
 </body>
