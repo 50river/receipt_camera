@@ -131,6 +131,10 @@
       display: none;
       z-index: 20;
     }
+    /* 入力項目コンテナ（初期非表示） */
+    #fieldsContainer {
+      display: none;
+    }
     /* ボタン */
     button {
       margin: 10px 5px;
@@ -275,42 +279,40 @@
         </div>
         <div id="preparationComplete">下準備完了</div>
       </div>
-      
-      <!-- 指示文 -->
-      <div class="instruction" style="font-size:0.9em; color:#555;">
-        入力フォームが選択されている状態で、領収書画像上の選択したい赤枠をタッチすると、選択した枠の画像とOCR結果が表示されます。<br>
-        金額項目の場合は「＋」「－」を押すと、次に入力するものを足すか引くかを指定でき、「＝」ボタンを押すと最終合計がフォームに反映されます。<br>
-        その他の項目の場合は、読み取れた文字を確認修正してOKを押すとその値が入力されます。キャンセルを押すと、枠を選び直すことができます。
+      <!-- 入力フォーム群をラップするコンテナ（初期は非表示） -->
+      <div id="fieldsContainer">
+        <div class="instruction" style="font-size:0.9em; color:#555;">
+          入力フォームが選択されている状態で、領収書画像上の選択したい赤枠をタッチすると、選択した枠の画像とOCR結果が表示されます。<br>
+          金額項目の場合は「＋」「－」を押すと、次に入力するものを足すか引くかを指定でき、「＝」ボタンを押すと最終合計がフォームに反映されます。<br>
+          その他の項目の場合は、読み取れた文字を確認修正してOKを押すとその値が入力されます。キャンセルを押すと、枠を選び直すことができます。
+        </div>
+        <div class="field-group">
+          <label for="dateField">日付:</label>
+          <input type="text" id="dateField" placeholder="OCR結果">
+        </div>
+        <div class="field-group">
+          <label for="amountField">金額:</label>
+          <input type="text" id="amountField" placeholder="OCR結果">
+        </div>
+        <div class="field-group">
+          <span class="field-label" style="font-weight: normal;">計算式:</span> <span id="amountExpression" class="normal-text"></span>
+        </div>
+        <div class="field-group">
+          <span class="field-label" style="font-weight: normal;">合計:</span> <span id="amountTotalDisplay" class="normal-text"></span>
+        </div>
+        <div class="field-group">
+          <label for="payeeField">支払先:</label>
+          <input type="text" id="payeeField" placeholder="OCR結果">
+        </div>
+        <div class="field-group">
+          <label for="descriptionField">摘要:</label>
+          <input type="text" id="descriptionField" placeholder="OCR結果">
+        </div>
+        <div class="field-group">
+          <label for="noteField">備考:</label>
+          <input type="text" id="noteField" placeholder="OCR結果">
+        </div>
       </div>
-      
-      <!-- 入力フォーム -->
-      <div class="field-group">
-        <label for="dateField">日付:</label>
-        <input type="text" id="dateField" placeholder="OCR結果">
-      </div>
-      <div class="field-group">
-        <label for="amountField">金額:</label>
-        <input type="text" id="amountField" placeholder="OCR結果">
-      </div>
-      <div class="field-group">
-        <span class="field-label" style="font-weight: normal;">計算式:</span> <span id="amountExpression" class="normal-text"></span>
-      </div>
-      <div class="field-group">
-        <span class="field-label" style="font-weight: normal;">合計:</span> <span id="amountTotalDisplay" class="normal-text"></span>
-      </div>
-      <div class="field-group">
-        <label for="payeeField">支払先:</label>
-        <input type="text" id="payeeField" placeholder="OCR結果">
-      </div>
-      <div class="field-group">
-        <label for="descriptionField">摘要:</label>
-        <input type="text" id="descriptionField" placeholder="OCR結果">
-      </div>
-      <div class="field-group">
-        <label for="noteField">備考:</label>
-        <input type="text" id="noteField" placeholder="OCR結果">
-      </div>
-      
       <button id="fsResetButton">フィールドリセット</button>
       <button id="ocrWholeButton">全体OCR実行</button>
       <button id="backToScreen1">戻る</button>
@@ -983,13 +985,15 @@
       // OCR処理完了時、「下準備完了」の文字を表示
       const completeText = document.getElementById("preparationComplete");
       completeText.style.display = "block";
-      // 2秒後にバーストアニメーションを実行
+      // 2秒後にバーストアニメーションを実行し、オーバーレイと下準備完了テキストを消すと同時に入力項目（fieldsContainer）を表示
       setTimeout(() => {
         const overlay = document.getElementById("ocrProgressOverlay");
         overlay.classList.add("burst");
         completeText.classList.add("burst");
         overlay.addEventListener("animationend", function() {
           overlay.style.display = "none";
+          // 入力項目を表示
+          document.getElementById("fieldsContainer").style.display = "block";
         });
         completeText.addEventListener("animationend", function() {
           completeText.style.display = "none";
