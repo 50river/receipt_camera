@@ -475,7 +475,12 @@
       if (currentCalcGroupIndex !== null) {
         let newVal = document.getElementById('calcDialogValue').value;
         groupOcrResults[currentCalcGroupIndex] = newVal;
-        if (calcSequence.length === 0) { calcSequence.push({ value: newVal }); }
+        if (calcSequence.length === 0) {
+          calcSequence.push({ value: newVal });
+        } else {
+          let last = calcSequence[calcSequence.length - 1];
+          if (last.operator !== undefined) { calcSequence.push({ value: newVal }); }
+        }
         calcSequence.push({ operator: "+" });
         updateAmountCalculation();
         closeCalcDialog();
@@ -487,7 +492,12 @@
       if (currentCalcGroupIndex !== null) {
         let newVal = document.getElementById('calcDialogValue').value;
         groupOcrResults[currentCalcGroupIndex] = newVal;
-        if (calcSequence.length === 0) { calcSequence.push({ value: newVal }); }
+        if (calcSequence.length === 0) {
+          calcSequence.push({ value: newVal });
+        } else {
+          let last = calcSequence[calcSequence.length - 1];
+          if (last.operator !== undefined) { calcSequence.push({ value: newVal }); }
+        }
         calcSequence.push({ operator: "-" });
         updateAmountCalculation();
         closeCalcDialog();
