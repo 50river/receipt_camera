@@ -57,25 +57,35 @@
     }
     
     /*************************************
-     * updateAmountCalculation
-     * calcSequence に基づいて計算式と合計金額を更新（※金額項目用）
+     * calcTotals
+     * 与えられた計算シーケンスから計算式と合計を求める純粋関数
      *************************************/
-    function updateAmountCalculation() {
-      if (calcSequence.length === 0) return;
-      let total = parseInt(calcSequence[0].value, 10) || 0;
-      let expression = calcSequence[0].value;
-      for (let i = 1; i < calcSequence.length; i += 2) {
-        let opObj = calcSequence[i];
-        let numObj = calcSequence[i+1];
+    function calcTotals(seq) {
+      if (!seq || seq.length === 0) return { expression: "", total: 0 };
+      let total = parseInt(seq[0].value, 10) || 0;
+      let expression = seq[0].value;
+      for (let i = 1; i < seq.length; i += 2) {
+        let opObj = seq[i];
+        let numObj = seq[i + 1];
         if (!opObj || !numObj) break;
         let op = opObj.operator;
         let num = parseInt(numObj.value, 10) || 0;
         if (op === "+") { total += num; expression += " + " + num; }
         else if (op === "-") { total -= num; expression += " - " + num; }
       }
-      document.getElementById("amountExpression").textContent = expression;
-      document.getElementById("amountTotalDisplay").textContent = total;
-      amountField.value = total;
+      return { expression, total };
+    }
+
+    /*************************************
+     * updateAmountCalculation
+     * calcSequence に基づいて DOM を更新する
+     *************************************/
+    function updateAmountCalculation() {
+      const result = calcTotals(calcSequence);
+      if (calcSequence.length === 0) return;
+      document.getElementById("amountExpression").textContent = result.expression;
+      document.getElementById("amountTotalDisplay").textContent = result.total;
+      amountField.value = result.total;
     }
     
     /*************************************
@@ -1063,3 +1073,8 @@
     correctedImage.addEventListener('error', function() {
       document.getElementById('imageSpinner').style.display = 'none';
     });
+
+    // Node.js 環境用エクスポート
+    if (typeof module !== 'undefined' && module.exports) {
+      module.exports = { calcTotals };
+    }
