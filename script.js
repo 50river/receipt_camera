@@ -117,12 +117,8 @@
       if (currentCalcGroupIndex !== null) {
         let newVal = document.getElementById('calcDialogValue').value;
         groupOcrResults[currentCalcGroupIndex] = newVal;
-        if (calcSequence.length === 0) {
-          calcSequence.push({ value: newVal });
-        } else {
-          let last = calcSequence[calcSequence.length - 1];
-          if (last.operator !== undefined) { calcSequence.push({ value: newVal }); }
-        }
+        // 常に入力値を追加してから演算子を記録
+        calcSequence.push({ value: newVal });
         calcSequence.push({ operator: "+" });
         updateAmountCalculation();
         closeCalcDialog();
@@ -134,12 +130,8 @@
       if (currentCalcGroupIndex !== null) {
         let newVal = document.getElementById('calcDialogValue').value;
         groupOcrResults[currentCalcGroupIndex] = newVal;
-        if (calcSequence.length === 0) {
-          calcSequence.push({ value: newVal });
-        } else {
-          let last = calcSequence[calcSequence.length - 1];
-          if (last.operator !== undefined) { calcSequence.push({ value: newVal }); }
-        }
+        // 常に入力値を追加してから演算子を記録
+        calcSequence.push({ value: newVal });
         calcSequence.push({ operator: "-" });
         updateAmountCalculation();
         closeCalcDialog();
@@ -951,7 +943,9 @@
      * convertJapaneseEra: 和暦→西暦変換
      *************************************/
     function convertJapaneseEra(dateStr) {
-      const match = dateStr.match(/(令和|平成|昭和)(元|\d+)[年](\d{1,2})[月](\d{1,2})[日]/);
+      // 全角数字を半角に変換してから判定
+      const normalized = dateStr.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+      const match = normalized.match(/(令和|平成|昭和)(元|\d+)[年](\d{1,2})[月](\d{1,2})[日]/);
       if (match) {
         const era = match[1];
         const yearPart = match[2];
@@ -1063,3 +1057,12 @@
     correctedImage.addEventListener('error', function() {
       document.getElementById('imageSpinner').style.display = 'none';
     });
+
+    // Node.js から利用できるようエクスポート
+    if (typeof module !== 'undefined') {
+      module.exports = {
+        convertJapaneseEra,
+        updateAmountCalculation,
+        calcSequence
+      };
+    }
