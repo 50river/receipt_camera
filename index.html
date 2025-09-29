@@ -43,6 +43,13 @@
     <!-- スクリーン２：フィールド選択＆OCR -->
     <div id="screen2" class="screen">
       <h2>フィールド選択＆OCR</h2>
+      <div class="field-group" style="margin-bottom:16px;">
+        <label for="ocrEngineSelect">OCRエンジン:</label>
+        <select id="ocrEngineSelect">
+          <option value="onnx">OnnxOCR（高速推論）</option>
+          <option value="tesseract">Tesseract.js（従来）</option>
+        </select>
+      </div>
       <!-- fsCanvasコンテナにプログレスオーバーレイと下準備完了の文字を追加 -->
       <div id="fsCanvasContainer">
         <canvas id="fsCanvas"></canvas>
@@ -130,8 +137,10 @@
   
   <!-- ライブラリ読み込み -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@axinc-ai/onnx-ocr@0.1.5/dist/onnx-ocr.umd.js"></script>
   <script async src="https://docs.opencv.org/3.4.0/opencv.js"></script>
   <script src="script.js"></script>
-  
+
 </body>
 </html>

@@ -14,6 +14,30 @@
     let currentSimpleGroupIndex = null;
     // 2セグメント用進捗保持変数（上部、下部）
     let segmentProgress = [0, 0];
+    let selectedOcrEngine = "onnx";
+    let onnxOcrInstance = null;
+    let onnxOcrInitialized = false;
+    let onnxOcrInitPromise = null;
+    let onnxReceiptCharList = null;
+    const onnxOcrConfig = {
+      detModel: "https://axinc-ai.github.io/onnx-ocr/model/ja/detector.onnx",
+      recModel: "https://axinc-ai.github.io/onnx-ocr/model/ja/recognizer.onnx",
+      charList: "https://axinc-ai.github.io/onnx-ocr/model/ja/char_list.txt"
+    };
+    // 日本の領収書で出現しやすい文字群（数字・通貨記号・主要な漢字など）
+    const japaneseReceiptCharacterSource = [
+      "0123456789",
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+      "abcdefghijklmnopqrstuvwxyz",
+      "円¥￥¥\\",
+      "年月日時分秒",
+      "領収書領収証金額合計税込税抜税額消費軽減率率割引値引現金振込振替請求書番号記号記載控除対象適格請求書発行事業者登録番",
+      "支払支払先支払者宛御中様内摘要備考品目数量単価小計店名店舗住所所在地株式会社有限会社株式會社㈱㈲",
+      "電話番号TELFAX〒郵便郵便番号都道府県市区町村丁目番地建物名室号室階",
+      "現場担当担当者担当印印鑑印影社判朱印",
+      "※＊★☆・.,、。，．:：;；-/－―ー‐()（）[]［］{}｛｝『』「」⌒~〜≒≡=＋+−-×÷"
+    ];
+    const japaneseReceiptCharacterPool = Array.from(new Set(japaneseReceiptCharacterSource.join("").split("")));
     
     /*************************************
      * 入力フォームのフォーカス処理
@@ -30,6 +54,18 @@
         selectedGroupIndex = null;
       });
     });
+
+    const ocrEngineSelect = document.getElementById("ocrEngineSelect");
+    if (ocrEngineSelect) {
+      selectedOcrEngine = ocrEngineSelect.value;
+      ocrEngineSelect.addEventListener("change", () => {
+        selectedOcrEngine = ocrEngineSelect.value;
+        segmentProgress = [0, 0];
+        updateCustomProgressBar();
+        groupOcrResults = {};
+        console.info(`OCRエンジンを${selectedOcrEngine}に切り替えました`);
+      });
+    }
     
     /*************************************
      * pasteOcrResultIntoInput
@@ -649,14 +685,17 @@
      * 画像を上下に2分割して並列OCR処理する関数
      *************************************/
     async function ocrImageInTwoSegments(image) {
-      // 画像の自然サイズで処理
+      if (selectedOcrEngine === "onnx") {
+        return await ocrImageWithOnnx(image);
+      }
+      // 画像の自然サイズで処理（Tesseract.js）
       let canvas = document.createElement('canvas');
       canvas.width = image.naturalWidth;
       canvas.height = image.naturalHeight;
       let ctx = canvas.getContext('2d');
       ctx.drawImage(image, 0, 0);
       let halfHeight = Math.floor(canvas.height / 2);
-      
+
       let segmentResults = await Promise.all(
         [0, 1].map(async (segIndex) => {
           let segHeight = segIndex === 0 ? halfHeight : (canvas.height - halfHeight);
@@ -666,8 +705,8 @@
           let segCtx = segCanvas.getContext('2d');
           segCtx.drawImage(canvas, 0, segIndex * halfHeight, canvas.width, segHeight, 0, 0, canvas.width, segHeight);
           let dataURL = segCanvas.toDataURL();
-          
-          const worker = Tesseract.createWorker({ 
+
+          const worker = Tesseract.createWorker({
             logger: m => {
               if(m.status==="recognizing text" && m.progress){
                 segmentProgress[segIndex] = m.progress;
@@ -689,12 +728,119 @@
           return data;
         })
       );
-      
+
       let combinedWords = [];
       segmentResults.forEach(result => {
         combinedWords = combinedWords.concat(result.words);
       });
       return { words: combinedWords };
+    }
+
+    async function ocrImageWithOnnx(image) {
+      await ensureOnnxOcrInitialized();
+      let canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      let ctx = canvas.getContext('2d');
+      ctx.drawImage(image, 0, 0);
+      const rawResults = await runOnnxOcr(canvas);
+      const words = normalizeOnnxWords(rawResults);
+      segmentProgress = [1, 1];
+      updateCustomProgressBar();
+      return { words };
+    }
+
+    function normalizeOnnxWords(rawResults) {
+      const candidates = Array.isArray(rawResults) ? rawResults : (Array.isArray(rawResults?.lines) ? rawResults.lines : []);
+      return candidates.map(item => {
+        const text = (item.text ?? item.label ?? "").trim();
+        let points = [];
+        if (Array.isArray(item.box)) points = item.box;
+        else if (Array.isArray(item.bbox)) points = item.bbox;
+        else if (Array.isArray(item.points)) points = item.points;
+        else if (Array.isArray(item.vertices)) points = item.vertices;
+        if (Array.isArray(points) && Array.isArray(points[0])) {
+          points = points.flat();
+        }
+        if (Array.isArray(points) && points.length && typeof points[0] === "object") {
+          points = points.reduce((acc, p) => acc.concat([p.x, p.y]), []);
+        }
+        let xs = [];
+        let ys = [];
+        for (let i = 0; i < points.length; i += 2) {
+          xs.push(points[i]);
+          ys.push(points[i + 1]);
+        }
+        if (xs.length === 0 || ys.length === 0) {
+          if (item.x !== undefined && item.y !== undefined && item.width !== undefined && item.height !== undefined) {
+            xs = [item.x, item.x + item.width];
+            ys = [item.y, item.y + item.height];
+          }
+        }
+        const x0 = xs.length ? Math.min(...xs) : 0;
+        const y0 = ys.length ? Math.min(...ys) : 0;
+        const x1 = xs.length ? Math.max(...xs) : 0;
+        const y1 = ys.length ? Math.max(...ys) : 0;
+        return {
+          text,
+          bbox: { x0, y0, x1, y1 }
+        };
+      }).filter(word => word.text.length > 0);
+    }
+
+    async function canvasToImageBitmap(canvas) {
+      if (window.createImageBitmap) {
+        return await createImageBitmap(canvas);
+      }
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = canvas.toDataURL();
+      });
+    }
+
+    async function ensureOnnxOcrInitialized() {
+      if (onnxOcrInitialized) return;
+      if (onnxOcrInitPromise) return onnxOcrInitPromise;
+      const OnnxOcrClass = window.OnnxOcr?.OnnxOcr || window.OnnxOcr?.default || window.OnnxOcr;
+      if (typeof OnnxOcrClass !== "function") {
+        throw new Error("OnnxOCRライブラリが読み込まれていません");
+      }
+      onnxOcrInitPromise = (async () => {
+        const charList = await buildJapaneseReceiptCharList();
+        onnxOcrInstance = new OnnxOcrClass({
+          executionProviders: ["wasm"],
+          detector: { model: onnxOcrConfig.detModel },
+          recognizer: {
+            model: onnxOcrConfig.recModel,
+            character: charList,
+            characters: charList,
+            charList: charList
+          }
+        });
+        await onnxOcrInstance.init();
+        onnxOcrInitialized = true;
+        return onnxOcrInstance;
+      })();
+      return onnxOcrInitPromise;
+    }
+
+    // OnnxOCRの文字リストを日本の領収書向けにマージして生成
+    async function buildJapaneseReceiptCharList() {
+      if (onnxReceiptCharList) return onnxReceiptCharList;
+      let baseChars = [];
+      try {
+        const response = await fetch(onnxOcrConfig.charList);
+        if (!response.ok) throw new Error(`charList取得に失敗しました: ${response.status}`);
+        const text = await response.text();
+        baseChars = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
+      } catch (error) {
+        console.warn("OnnxOCR文字リストの取得に失敗しました。内蔵リストのみで継続します。", error);
+      }
+      const merged = new Set(baseChars.concat(japaneseReceiptCharacterPool));
+      onnxReceiptCharList = Array.from(merged).join("\n");
+      return onnxReceiptCharList;
     }
     
     /*************************************
@@ -852,28 +998,91 @@
         tempCanvas.height = originalHeight;
         const tempCtx = tempCanvas.getContext('2d');
         tempCtx.drawImage(fsImage, originalX, originalY, originalWidth, originalHeight, 0, 0, originalWidth, originalHeight);
-        const croppedDataURL = tempCanvas.toDataURL();
-        binarizeImage(croppedDataURL).then(binarizedDataURL => {
-          Tesseract.recognize(
-            binarizedDataURL,
-            'jpn',
-            {
-              langPath: 'https://tessdata.projectnaptha.com/4.0.0_best/',
-              logger: m => console.log(field, m),
-              tessedit_char_whitelist: '0123456789年月日-/： ',
-              tessedit_pageseg_mode: 6
-            }
-          ).then(({ data: { text } }) => {
-            resolve(replaceCircledNumbers(text.replace(/\s+/g, "")).trim());
+        if (selectedOcrEngine === "onnx") {
+          recognizeRegionWithOnnx(tempCanvas).then(text => {
+            resolve(processFieldSpecificText(field, text));
           }).catch(err => {
-            console.error(field, err);
+            console.error("OnnxOCR error", err);
             resolve("エラー");
           });
-        }).catch(err => {
-          console.error("Binarization error", err);
-          resolve("エラー");
-        });
+        } else {
+          const croppedDataURL = tempCanvas.toDataURL();
+          binarizeImage(croppedDataURL).then(binarizedDataURL => {
+            Tesseract.recognize(
+              binarizedDataURL,
+              'jpn',
+              {
+                langPath: 'https://tessdata.projectnaptha.com/4.0.0_best/',
+                logger: m => console.log(field, m),
+                tessedit_char_whitelist: '0123456789年月日-/： ',
+                tessedit_pageseg_mode: 6
+              }
+            ).then(({ data: { text } }) => {
+              resolve(processFieldSpecificText(field, text));
+            }).catch(err => {
+              console.error(field, err);
+              resolve("エラー");
+            });
+          }).catch(err => {
+            console.error("Binarization error", err);
+            resolve("エラー");
+          });
+        }
       });
+    }
+
+    function processFieldSpecificText(field, text) {
+      const compacted = text.replace(/\s+/g, "");
+      return replaceCircledNumbers(compacted).trim();
+    }
+
+    async function recognizeRegionWithOnnx(canvas) {
+      await ensureOnnxOcrInitialized();
+      const rawResults = await runOnnxOcr(canvas);
+      const words = normalizeOnnxWords(rawResults);
+      if (!words.length) return "";
+      return words.map(w => w.text).join("");
+    }
+
+    async function runOnnxOcr(input) {
+      await ensureOnnxOcrInitialized();
+      const candidates = await buildOnnxInputCandidates(input);
+      const methods = ["run", "execute", "predict", "recognize"];
+      let lastError = null;
+      for (const method of methods) {
+        if (typeof onnxOcrInstance[method] !== "function") continue;
+        for (const candidate of candidates) {
+          try {
+            return await onnxOcrInstance[method](candidate);
+          } catch (error) {
+            lastError = error;
+          }
+        }
+      }
+      if (lastError) throw lastError;
+      throw new Error("OnnxOCRインスタンスに実行メソッドが見つかりません");
+    }
+
+    // OnnxOCRが受け取れる複数形式（Canvas, ImageData, ImageBitmap）を用意
+    async function buildOnnxInputCandidates(rawInput) {
+      const candidates = [rawInput];
+      if (typeof HTMLCanvasElement !== "undefined" && rawInput instanceof HTMLCanvasElement) {
+        try {
+          const ctx = rawInput.getContext('2d');
+          if (ctx) {
+            candidates.push(ctx.getImageData(0, 0, rawInput.width, rawInput.height));
+          }
+        } catch (error) {
+          console.warn("ImageData 生成に失敗しました", error);
+        }
+        try {
+          const bitmap = await canvasToImageBitmap(rawInput);
+          candidates.push(bitmap);
+        } catch (error) {
+          console.warn("ImageBitmap 生成に失敗しました", error);
+        }
+      }
+      return candidates;
     }
     
     /*************************************
